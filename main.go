@@ -12,30 +12,33 @@ import (
 )
 
 func main() {
-	// Initialize configuration
+	// --- INI PERBAIKANNYA ---
+	// 1. Inisialisasi logger DULU
+	logger.InitLogger()
+	defer logger.Sync()
+	// --- AKHIR PERBAIKAN ---
+
+	// 2. Baru inisialisasi konfigurasi
+	// Jika config.InitINIConfig() gagal, logger sudah siap mencatatnya
 	config.InitINIConfig()
 	config.LoadAppPort()
 	config.LoadJWTConfig()
 	
-	// Initialize logger
-	logger.InitLogger()
-	defer logger.Sync()
-	
-	// Initialize database
+	// 3. Inisialisasi database
 	db, err := database.InitDB()
 	if err != nil {
 		logger.Error("Failed to initialize database", zap.Error(err))
 		panic("Database connection failed")
 	}
 	
-	// Setup Gin
+	// 4. Setup Gin
 	router := gin.Default()
 	router.Use(middleware.CORSMiddleware())
 	
-	// Setup routes
+	// 5. Setup routes
 	routes.SetupRoutes(router, db)
 	
-	// Start server
+	// 6. Start server
 	logger.Info("Starting KPI System Backend", zap.String("port", config.AppPort))
 	router.Run(":" + config.AppPort)
 }
