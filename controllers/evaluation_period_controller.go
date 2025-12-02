@@ -2,10 +2,12 @@ package controllers
 
 import (
 	"KPI_System_Backend/models"
+	"KPI_System_Backend/logger"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -158,11 +160,8 @@ func (pc *EvaluationPeriodController) DeletePeriod(c *gin.Context) {
 }
 
 // --- Fungsi Khusus ---
-
-// SetActivePeriod: Mengaktifkan satu periode dan menonaktifkan yang lain
-// @Route: PATCH /api/admin/periods/:id/activate
 func (pc *EvaluationPeriodController) SetActivePeriod(c *gin.Context) {
-	id := c.Param("id")
+	targetID := c.Param("id")
 
 	// 1. Mulai Transaksi
 	tx := pc.DB.Begin()
@@ -171,18 +170,31 @@ func (pc *EvaluationPeriodController) SetActivePeriod(c *gin.Context) {
 		return
 	}
 
-	// 2. Nonaktifkan semua periode lain
-	// Kita set IsActive = false DIMANA id BUKAN id yang kita tuju
-	if err := tx.Model(&models.EvaluationPeriod{}).Where("id != ?", id).Update("is_active", false).Error; err != nil {
-		tx.Rollback()
-		Response(c, http.StatusInternalServerError, "Gagal menonaktifkan periode lain", nil)
-		return
+	// 2. LANGKAH AMAN: Cari dulu periode mana yang sedang aktif (jika ada)
+	var activePeriod models.EvaluationPeriod
+	// Kita cari yang is_active = true
+	if err := tx.Where("is_active = ?", true).First(&activePeriod).Error; err == nil {
+		// Jika DITEMUKAN periode aktif, kita matikan spesifik berdasarkan ID-nya
+		// Ini aman dari 'Safe Update Mode' karena kita pakai Primary Key (ID)
+		if err := tx.Model(&models.EvaluationPeriod{}).
+			Where("id = ?", activePeriod.ID).
+			Update("is_active", false).Error; err != nil {
+			
+			tx.Rollback()
+			logger.Error("Gagal menonaktifkan periode lama", zap.Error(err))
+			Response(c, http.StatusInternalServerError, "Gagal menonaktifkan periode lama", nil)
+			return
+		}
 	}
 
-	// 3. Aktifkan periode yang kita tuju
-	if err := tx.Model(&models.EvaluationPeriod{}).Where("id = ?", id).Update("is_active", true).Error; err != nil {
+	// 3. Aktifkan periode target
+	if err := tx.Model(&models.EvaluationPeriod{}).
+		Where("id = ?", targetID).
+		Update("is_active", true).Error; err != nil {
+		
 		tx.Rollback()
-		Response(c, http.StatusInternalServerError, "Gagal mengaktifkan periode", nil)
+		logger.Error("Gagal mengaktifkan periode baru", zap.Error(err))
+		Response(c, http.StatusInternalServerError, "Gagal mengaktifkan periode baru", nil)
 		return
 	}
 

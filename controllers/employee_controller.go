@@ -118,13 +118,13 @@ func (ec *EmployeeController) CreateEmployee(c *gin.Context) {
 // @Route: GET /api/admin/employees
 func (ec *EmployeeController) GetAllEmployees(c *gin.Context) {
 	var employeeDetails []models.EmployeeDetail
+	
+    // Query ini menggabungkan data dari 3 tabel: employees, divisions, dan users
 	query := ec.DB.Model(&models.Employee{}).
-		Select("employees.*, divisions.name as division_name, supervisors.name as supervisor_name").
+		Select("employees.*, divisions.name as division_name, supervisors.name as supervisor_name, users.username, users.role").
 		Joins("left join divisions on divisions.id = employees.division_id").
-		Joins("left join employees as supervisors on supervisors.id = employees.direct_supervisor_id")
-		
-	// Tambahan: Kita hanya ingin mengambil pegawai yang aktif
-	query = query.Where("employees.is_active = ?", true)
+		Joins("left join employees as supervisors on supervisors.id = employees.direct_supervisor_id").
+		Joins("left join users on users.employee_id = employees.id") // <--- WAJIB ADA
 
 	if err := query.Scan(&employeeDetails).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal mengambil data pegawai", nil)
@@ -132,7 +132,6 @@ func (ec *EmployeeController) GetAllEmployees(c *gin.Context) {
 	}
 	Response(c, http.StatusOK, "Data semua pegawai berhasil diambil", employeeDetails)
 }
-
 // GetEmployee: Mendapatkan detail satu pegawai
 // @Route: GET /api/admin/employees/:id
 func (ec *EmployeeController) GetEmployee(c *gin.Context) {
