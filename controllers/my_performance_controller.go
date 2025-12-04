@@ -34,6 +34,8 @@ func (pc *MyPerformanceController) getEmployeeIDFromToken(c *gin.Context) (uint,
 
 // GetMyPerformanceHistory: Mendapatkan riwayat semua evaluasi yang sudah selesai
 // @Route: GET /api/employee/history
+// GetMyPerformanceHistory: Mendapatkan riwayat semua evaluasi yang sudah selesai
+// @Route: GET /api/employee/history
 func (pc *MyPerformanceController) GetMyPerformanceHistory(c *gin.Context) {
 	// 1. Dapatkan EmployeeID dari token
 	employeeID, err := pc.getEmployeeIDFromToken(c)
@@ -42,21 +44,52 @@ func (pc *MyPerformanceController) GetMyPerformanceHistory(c *gin.Context) {
 		return
 	}
 
-	// 2. Cari semua evaluasi yang:
-	//    - Milik pegawai ini (employee_id = ?)
-	//    - Sudah di-submit (status = "submitted")
+	// 2. Query data evaluasi
+	// Kita gunakan Preload dengan klausa Unscoped (jika ada soft delete) atau left join manual
+	// Tapi untuk amannya, kita ambil evaluasi dulu, baru mapping periodenya
 	var evaluations []models.Evaluation
-	if err := pc.DB.Preload("Period"). // Ambil juga data periode
+	if err := pc.DB.
 		Where("employee_id = ? AND status = ?", employeeID, db_var.EvaluationStatusSubmitted).
-		Order("submitted_at desc"). // Urutkan dari yang terbaru
+		Order("submitted_at desc").
 		Find(&evaluations).Error; err != nil {
+		
 		Response(c, http.StatusInternalServerError, "Gagal mengambil riwayat evaluasi", nil)
 		return
 	}
 
-	Response(c, http.StatusOK, "Riwayat evaluasi berhasil diambil", evaluations)
-}
+	// 3. Mapping response (Manual Join agar data tidak hilang jika periode terhapus)
+	type HistoryResponse struct {
+		models.Evaluation
+		PeriodName string `json:"period_name"`
+	}
 
+	var response []HistoryResponse
+	for _, e := range evaluations {
+		var pName string = "Periode Tidak Diketahui"
+		
+		// Cari nama periode manual
+		if e.PeriodID != 0 {
+			var p models.EvaluationPeriod
+			// Gunakan Unscoped() agar jika periode sudah di-soft delete, namanya tetap muncul
+			if err := pc.DB.Unscoped().First(&p, e.PeriodID).Error; err == nil {
+				pName = p.Name
+			}
+		}
+
+		res := HistoryResponse{
+			Evaluation: e,
+			PeriodName: pName,
+		}
+		response = append(response, res)
+	}
+
+	// Pastikan return array kosong [] bukan null jika tidak ada data
+	if response == nil {
+		response = []HistoryResponse{}
+	}
+
+	Response(c, http.StatusOK, "Riwayat evaluasi berhasil diambil", response)
+}
 // GetMyLatestPerformance: Mendapatkan 1 evaluasi terbaru (untuk dashboard)
 // @Route: GET /api/employee/latest
 func (pc *MyPerformanceController) GetMyLatestPerformance(c *gin.Context) {

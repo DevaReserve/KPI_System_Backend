@@ -37,6 +37,7 @@ func InitDB() (*gorm.DB, error) {
 	logger.Info("Running database migrations...")
 	err = db.AutoMigrate(
 		&models.Division{},
+		&models.Position{},
 		&models.Employee{},
 		&models.User{},
 		&models.EvaluationPeriod{},

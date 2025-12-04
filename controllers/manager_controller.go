@@ -4,7 +4,7 @@ import (
 	"KPI_System_Backend/db_var"
 	"KPI_System_Backend/models"
 	"net/http"
-	"time" // Pastikan 'time' ada di import
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -49,10 +49,8 @@ func (mc *ManagerController) getActivePeriod() (*models.EvaluationPeriod, error)
 // GetMyTeam: Mendapatkan daftar pegawai yang harus dinilai oleh manajer
 // @Route: GET /api/manager/my-team
 func (mc *ManagerController) GetMyTeam(c *gin.Context) {
-	// Ambil userID (yang merupakan ID Manajer) dari token
 	managerUserID, _ := c.Get("userID")
 
-	// 1. Cari EmployeeID si manajer
 	var managerUser models.User
 	if err := mc.DB.First(&managerUser, managerUserID).Error; err != nil {
 		Response(c, http.StatusNotFound, "Data manajer tidak ditemukan", nil)
@@ -60,7 +58,6 @@ func (mc *ManagerController) GetMyTeam(c *gin.Context) {
 	}
 	managerEmployeeID := managerUser.EmployeeID
 
-	// 2. Cari semua pegawai yang atasan langsungnya adalah manajer ini
 	var team []models.EmployeeDetail
 	query := mc.DB.Model(&models.Employee{}).
 		Select("employees.*, divisions.name as division_name").
@@ -78,7 +75,6 @@ func (mc *ManagerController) GetMyTeam(c *gin.Context) {
 // GetTeamEvaluationStatus: Mendapatkan status evaluasi tim untuk periode aktif
 // @Route: GET /api/manager/team-status
 func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
-	// 1. Dapatkan periode aktif
 	activePeriod, err := mc.getActivePeriod()
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -89,7 +85,6 @@ func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
 		return
 	}
 
-	// 2. Ambil ID manajer
 	managerUserID, _ := c.Get("userID")
 	var managerUser models.User
 	if err := mc.DB.First(&managerUser, managerUserID).Error; err != nil {
@@ -98,36 +93,32 @@ func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
 	}
 	managerEmployeeID := managerUser.EmployeeID
 
-	// 3. Ambil data tim (mirip GetMyTeam)
 	var team []models.Employee
 	if err := mc.DB.Where("direct_supervisor_id = ? AND is_active = ?", managerEmployeeID, true).Find(&team).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal mengambil data tim", nil)
 		return
 	}
 
-	// 4. Buat response
 	type TeamStatusResponse struct {
-		EmployeeID     uint   `json:"employee_id"`
-		EmployeeName   string `json:"employee_name"`
-		EvaluationID   *uint  `json:"evaluation_id"` // ID evaluasi jika sudah dibuat
-		EvaluationStatus string `json:"evaluation_status"` // "Belum Dibuat", "Draft", "Submitted"
+		EmployeeID       uint   `json:"employee_id"`
+		EmployeeName     string `json:"employee_name"`
+		EvaluationID     *uint  `json:"evaluation_id"`
+		EvaluationStatus string `json:"evaluation_status"`
 	}
 
 	var response []TeamStatusResponse
 	
-	// Loop untuk setiap anggota tim
 	for _, employee := range team {
 		var evaluation models.Evaluation
 		status := TeamStatusResponse{
-			EmployeeID:     employee.ID,
-			EmployeeName:   employee.Name,
-			EvaluationStatus: "Belum Dibuat", // Default
+			EmployeeID:       employee.ID,
+			EmployeeName:     employee.Name,
+			EvaluationStatus: "Belum Dibuat",
 		}
 		
-		// Cek apakah sudah ada evaluasi untuk pegawai ini di periode aktif
 		err := mc.DB.Where("employee_id = ? AND period_id = ?", employee.ID, activePeriod.ID).First(&evaluation).Error
 		
-		if err == nil { // Evaluasi ditemukan
+		if err == nil {
 			status.EvaluationID = &evaluation.ID
 			status.EvaluationStatus = evaluation.Status
 		}
@@ -183,12 +174,18 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 		return
 	}
 
-	// 6. Dapatkan semua Indikator yang relevan
+	// 6. Dapatkan semua Indikator yang relevan (PERBAIKAN LOGIKA OR)
 	var indicators []models.PerformanceIndicator
-	// Ambil indikator "umum" (DivisionID IS NULL) ATAU "spesifik" (DivisionID = divisi pegawai)
-	mc.DB.Where("indicator_type = ? AND division_id IS NULL", db_var.IndicatorTypeUmum).
-		Or("indicator_type = ? AND division_id = ?", db_var.IndicatorTypeSpesifik, employee.DivisionID).
-		Find(&indicators)
+	
+	// Gunakan Grouped Condition agar logika query benar:
+	// SELECT * FROM indicators WHERE (type = 'umum') OR (type = 'spesifik' AND division_id = X)
+	if err := mc.DB.Where(
+		mc.DB.Where("indicator_type = ?", db_var.IndicatorTypeUmum).
+		Or("indicator_type = ? AND division_id = ?", db_var.IndicatorTypeSpesifik, employee.DivisionID),
+	).Find(&indicators).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal mengambil indikator penilaian", nil)
+		return
+	}
 
 	if len(indicators) == 0 {
 		Response(c, http.StatusBadRequest, "Tidak ada indikator penilaian yang di-set untuk divisi ini atau umum", nil)
@@ -203,8 +200,8 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 		EmployeeID:  req.EmployeeID,
 		EvaluatorID: evaluatorEmployeeID,
 		PeriodID:    activePeriod.ID,
-		TotalScore:  0, // Belum dihitung
-		Status:      db_var.EvaluationStatusDraft, // Status draf
+		TotalScore:  0,
+		Status:      db_var.EvaluationStatusDraft,
 	}
 	if err := tx.Create(&evaluation).Error; err != nil {
 		tx.Rollback()
@@ -218,7 +215,7 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 		score := models.EvaluationScore{
 			EvaluationID:  evaluation.ID,
 			IndicatorID:   indicator.ID,
-			Score:         0, // Default 0 (belum dinilai)
+			Score:         0,
 			ConvertedScore: 0,
 		}
 		scores = append(scores, score)
@@ -233,7 +230,6 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 	// 8. Commit Transaksi
 	tx.Commit()
 
-	// 9. Kembalikan ID evaluasi yang baru
 	Response(c, http.StatusCreated, "Draf evaluasi berhasil dibuat", gin.H{"evaluation_id": evaluation.ID})
 }
 
@@ -242,14 +238,12 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 func (mc *ManagerController) GetEvaluationDetail(c *gin.Context) {
 	id := c.Param("id")
 	
-	// Ambil data evaluasi utama
 	var evaluation models.Evaluation
 	if err := mc.DB.First(&evaluation, id).Error; err != nil {
 		Response(c, http.StatusNotFound, "Evaluasi tidak ditemukan", nil)
 		return
 	}
 
-	// Keamanan: Cek apakah manajer ini yang punya
 	managerUserID, _ := c.Get("userID")
 	var managerUser models.User
 	mc.DB.First(&managerUser, managerUserID)
@@ -258,14 +252,12 @@ func (mc *ManagerController) GetEvaluationDetail(c *gin.Context) {
 		return
 	}
 	
-	// Ambil semua skor yang terhubung, preload Indikator dan Divisi
 	var scores []models.EvaluationScore
 	mc.DB.Preload("Indicator").
 		Preload("Indicator.Division").
 		Where("evaluation_id = ?", id).
 		Find(&scores)
 
-	// Ambil data pegawai yang dinilai
 	var employee models.EmployeeDetail
 	mc.DB.Model(&models.Employee{}).
 		Select("employees.*, divisions.name as division_name").
@@ -273,11 +265,9 @@ func (mc *ManagerController) GetEvaluationDetail(c *gin.Context) {
 		Where("employees.id = ?", evaluation.EmployeeID).
 		First(&employee)
 		
-	// Ambil data periode
 	var period models.EvaluationPeriod
 	mc.DB.First(&period, evaluation.PeriodID)
 
-	// Gabungkan semua data
 	response := gin.H{
 		"evaluation_header": evaluation,
 		"employee_detail":   employee,
@@ -294,14 +284,12 @@ func (mc *ManagerController) GetEvaluationDetail(c *gin.Context) {
 func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 	id := c.Param("id")
 
-	// 1. Ambil data evaluasi yang ada
 	var evaluation models.Evaluation
 	if err := mc.DB.First(&evaluation, id).Error; err != nil {
 		Response(c, http.StatusNotFound, "Evaluasi tidak ditemukan", nil)
 		return
 	}
 	
-	// 2. Keamanan: Cek manajer
 	managerUserID, _ := c.Get("userID")
 	var managerUser models.User
 	mc.DB.First(&managerUser, managerUserID)
@@ -310,37 +298,30 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 		return
 	}
 	
-	// 3. Cek status (tidak bisa submit ulang)
 	if evaluation.Status == db_var.EvaluationStatusSubmitted {
 		Response(c, http.StatusBadRequest, "Evaluasi ini sudah disubmit sebelumnya", nil)
 		return
 	}
 
-	// 4. Bind request JSON
 	var req EvaluationSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Response(c, http.StatusBadRequest, "Format request tidak valid", err.Error())
 		return
 	}
 
-	// 5. Mulai Transaksi
 	tx := mc.DB.Begin()
 	var totalWeightedScore float64 = 0
 
-	// 6. Loop dan update setiap skor
 	for _, scoreReq := range req.Scores {
 		var score models.EvaluationScore
-		// Ambil skor DAN indikator (untuk bobot)
 		if err := tx.Preload("Indicator").Where("id = ? AND evaluation_id = ?", scoreReq.ScoreID, id).First(&score).Error; err != nil {
 			tx.Rollback()
 			Response(c, http.StatusBadRequest, "Data skor tidak cocok", nil)
 			return
 		}
 		
-		// Update skor
 		score.Score = scoreReq.Score
 		score.Notes = scoreReq.Notes
-		// Konversi skor (1-5) ke poin (20-100)
 		score.ConvertedScore = db_var.ScoreConversion[scoreReq.Score]
 		
 		if err := tx.Save(&score).Error; err != nil {
@@ -349,21 +330,16 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 			return
 		}
 		
-		// 7. Hitung skor tertimbang
-		// (Skor Poin * Bobot %)
 		weightedScore := float64(score.ConvertedScore) * (score.Indicator.Weight / 100.0)
 		totalWeightedScore += weightedScore
 	}
 	
-	// 8. Update 'Evaluation' (header)
 	evaluation.Feedback = req.Feedback
 	evaluation.TotalScore = totalWeightedScore
-	evaluation.Status = db_var.EvaluationStatusSubmitted // UBAH STATUS
+	evaluation.Status = db_var.EvaluationStatusSubmitted
 	
-	// --- INI PERBAIKANNYA ---
 	now := time.Now()
-	evaluation.SubmittedAt = &now // Ambil alamat memori dari 'now'
-	// --- AKHIR PERBAIKAN ---
+	evaluation.SubmittedAt = &now
 	
 	if err := tx.Save(&evaluation).Error; err != nil {
 		tx.Rollback()
@@ -371,7 +347,6 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 		return
 	}
 
-	// 9. Commit Transaksi
 	if err := tx.Commit().Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
 		return

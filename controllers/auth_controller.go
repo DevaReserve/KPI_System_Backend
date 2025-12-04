@@ -78,3 +78,52 @@ func (ac *AuthController) GetProfile(c *gin.Context) {
 
 	Response(c, http.StatusOK, "Profile retrieved successfully", user)
 }
+
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+func (ac *AuthController) ChangePassword(c *gin.Context) {
+	// 1. Ambil UserID dari Token
+	userID, exists := c.Get("userID")
+	if !exists {
+		Response(c, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	// 2. Bind Request
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Response(c, http.StatusBadRequest, "Format password tidak valid (min 6 karakter)", nil)
+		return
+	}
+
+	// 3. Cari User di Database
+	var user models.User
+	if err := ac.DB.First(&user, userID).Error; err != nil {
+		Response(c, http.StatusNotFound, "User tidak ditemukan", nil)
+		return
+	}
+
+	// 4. Verifikasi Password Lama
+	if !helper.CheckPasswordHash(req.OldPassword, user.PasswordHash) {
+		Response(c, http.StatusBadRequest, "Password lama salah", nil)
+		return
+	}
+
+	// 5. Hash Password Baru
+	newHash, err := helper.HashPassword(req.NewPassword)
+	if err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal memproses password baru", nil)
+		return
+	}
+
+	// 6. Simpan Password Baru
+	if err := ac.DB.Model(&user).Update("password_hash", newHash).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal mengupdate password", nil)
+		return
+	}
+
+	Response(c, http.StatusOK, "Password berhasil diubah", nil)
+}
