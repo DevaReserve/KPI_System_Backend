@@ -1,7 +1,6 @@
 package config
 
 import (
-	"log"
 	"KPI_System_Backend/global_var"
 	"KPI_System_Backend/logger"
 
@@ -19,35 +18,51 @@ var (
 func InitINIConfig() {
 	cfg, err := ini.Load("Setting.ini")
 	if err != nil {
-		logger.Error("failed to read setting.ini file", zap.Error(err))
-		log.Panic("Failed to read file:", err)
+		// Fallback jika file tidak ada (agar tidak panic saat dev)
+		logger.Warn("failed to read setting.ini file, using defaults", zap.Error(err))
+		JWTSecret = "rahasia_default_kpi_system_123"
+		JWTExpiry = 24
+		AppPort = ":8080"
+		return
 	}
 	IniConfig = cfg
 }
 
 func GetIniDatabase() global_var.DatabaseConnection {
-	HostName := IniConfig.Section("MainDatabase").Key("Host Name").String()
-	Port := IniConfig.Section("MainDatabase").Key("Port").String()
-	UserName := IniConfig.Section("MainDatabase").Key("User Name").String()
-	Password := IniConfig.Section("MainDatabase").Key("Password").String()
-	DatabaseName := IniConfig.Section("MainDatabase").Key("Database Name").String()
-	CreateDBTest := IniConfig.Section("MainDatabase").Key("CreateDBTest").MustBool(false)
-
+	if IniConfig == nil {
+		return global_var.DatabaseConnection{}
+	}
+	
+	section := IniConfig.Section("MainDatabase")
 	return global_var.DatabaseConnection{
-		Host:         HostName,
-		Port:         Port,
-		User:         UserName,
-		Password:     Password,
-		DatabaseName: DatabaseName,
-		CreateDBTest: CreateDBTest,
+		Host:         section.Key("Host Name").String(),
+		Port:         section.Key("Port").String(),
+		User:         section.Key("User Name").String(),
+		Password:     section.Key("Password").String(),
+		DatabaseName: section.Key("Database Name").String(),
+		CreateDBTest: section.Key("CreateDBTest").MustBool(false),
 	}
 }
 
 func LoadAppPort() {
-	AppPort = IniConfig.Section("GlobalConfig").Key("AppPort").String()
+	if IniConfig != nil {
+		AppPort = IniConfig.Section("GlobalConfig").Key("AppPort").String()
+	}
+	if AppPort == "" {
+		AppPort = ":8080"
+	}
 }
 
 func LoadJWTConfig() {
-	JWTSecret = IniConfig.Section("JWTConfig").Key("Secret").String()
-	JWTExpiry = IniConfig.Section("JWTConfig").Key("ExpiryHours").MustInt(24)
+	if IniConfig != nil {
+		JWTSecret = IniConfig.Section("JWTConfig").Key("Secret").String()
+		JWTExpiry = IniConfig.Section("JWTConfig").Key("ExpiryHours").MustInt(24)
+	}
+	// Fallback values
+	if JWTSecret == "" {
+		JWTSecret = "rahasia_super_aman_cakra_123"
+	}
+	if JWTExpiry == 0 {
+		JWTExpiry = 24
+	}
 }

@@ -11,19 +11,22 @@ import (
 	"go.uber.org/zap"
 )
 
-// AuthMiddleware dari file Anda sebelumnya
+// AuthMiddleware: Memvalidasi Token
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			logger.Warn("Missing authorization header")
-			c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
-				Status:  http.StatusUnauthorized,
-				Message: "Authorization header required",
-				Data:    nil,
-			})
-			c.Abort()
-			return
+			// Cek query param juga (opsional, kadang berguna untuk download file)
+			authHeader = c.Query("token")
+			if authHeader == "" {
+				c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
+					Status:  http.StatusUnauthorized,
+					Message: "Authorization header required",
+					Data:    nil,
+				})
+				c.Abort()
+				return
+			}
 		}
 
 		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
@@ -32,23 +35,24 @@ func AuthMiddleware() gin.HandlerFunc {
 			logger.Warn("Invalid token", zap.Error(err))
 			c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
 				Status:  http.StatusUnauthorized,
-				Message: "Invalid token",
+				Message: "Invalid token or expired",
 				Data:    nil,
 			})
 			c.Abort()
 			return
 		}
 
-		// Set user info in context
+		// PENTING: Set context keys yang konsisten
 		c.Set("userID", claims.UserID)
 		c.Set("username", claims.Username)
-		c.Set("userRole", claims.Role)
+		// Gunakan "role" (bukan userRole) agar sesuai dengan routes.go logic
+		c.Set("role", claims.Role) 
 
 		c.Next()
 	}
 }
 
-// CORSMiddleware dari file Anda sebelumnya
+// CORSMiddleware
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -64,23 +68,25 @@ func CORSMiddleware() gin.HandlerFunc {
 	}
 }
 
-// RoleCheckMiddleware yang baru saja kita buat
+// RoleCheckMiddleware: Mendukung MULTI ROLE (Variadic ...string)
 func RoleCheckMiddleware(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Ambil role dari context, yang sudah di-set oleh AuthMiddleware
-		userRole, exists := c.Get("userRole")
+		// Ambil "role" yang diset di AuthMiddleware
+		userRoleInterface, exists := c.Get("role")
 		if !exists {
-			c.JSON(http.StatusForbidden, global_var.ResponseFormat{
-				Status:  http.StatusForbidden,
-				Message: "Akses ditolak (role tidak ditemukan)",
+			c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
+				Status:  http.StatusUnauthorized,
+				Message: "Unauthorized (Role not found)",
 				Data:    nil,
 			})
 			c.Abort()
 			return
 		}
 
-		// Cek apakah role pengguna ada di dalam daftar yang diizinkan
+		userRole := userRoleInterface.(string)
 		isAllowed := false
+
+		// Cek apakah role user ada di daftar allowedRoles
 		for _, role := range allowedRoles {
 			if userRole == role {
 				isAllowed = true
@@ -91,14 +97,13 @@ func RoleCheckMiddleware(allowedRoles ...string) gin.HandlerFunc {
 		if !isAllowed {
 			c.JSON(http.StatusForbidden, global_var.ResponseFormat{
 				Status:  http.StatusForbidden,
-				Message: "Anda tidak memiliki hak akses untuk fitur ini",
+				Message: "Akses Ditolak: Anda tidak memiliki izin untuk fitur ini",
 				Data:    nil,
 			})
 			c.Abort()
 			return
 		}
 
-		// Jika diizinkan, lanjutkan
 		c.Next()
 	}
 }

@@ -39,7 +39,6 @@ func (pc *PositionController) CreatePosition(c *gin.Context) {
 		Response(c, http.StatusConflict, "Gagal membuat jabatan", nil)
 		return
 	}
-
 	Response(c, http.StatusCreated, "Jabatan berhasil dibuat", position)
 }
 
@@ -54,9 +53,10 @@ func (pc *PositionController) GetAllPositions(c *gin.Context) {
 
 func (pc *PositionController) UpdatePosition(c *gin.Context) {
 	id := c.Param("id")
-	var position models.Position // Definisi variabel di awal scope fungsi
 	
-	// Cari dulu datanya
+	// FIX: Deklarasi variabel di luar blok if
+	var position models.Position 
+
 	if err := pc.DB.First(&position, id).Error; err != nil {
 		Response(c, http.StatusNotFound, "Jabatan tidak ditemukan", nil)
 		return
@@ -68,17 +68,14 @@ func (pc *PositionController) UpdatePosition(c *gin.Context) {
 		return
 	}
 
-	// Update data
 	position.Name = req.Name
 	position.Description = req.Description
 	position.DivisionID = req.DivisionID
 
-	// Simpan ke DB
 	if err := pc.DB.Save(&position).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal memperbarui jabatan", nil)
 		return
 	}
-
 	Response(c, http.StatusOK, "Jabatan berhasil diperbarui", position)
 }
 

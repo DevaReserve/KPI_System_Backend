@@ -274,3 +274,30 @@ func (ec *EmployeeController) DeleteEmployee(c *gin.Context) {
 
 	Response(c, http.StatusOK, "Pegawai berhasil dinonaktifkan", nil)
 }
+
+func (ec *EmployeeController) ResetPassword(c *gin.Context) {
+	id := c.Param("id")
+
+	// 1. Cari User berdasarkan Employee ID
+	var user models.User
+	if err := ec.DB.Where("employee_id = ?", id).First(&user).Error; err != nil {
+		Response(c, http.StatusNotFound, "Akun pengguna tidak ditemukan untuk pegawai ini", nil)
+		return
+	}
+
+	// 2. Hash Password Default ('cakra123')
+	// Pastikan Anda sudah import "KPI_System_Backend/helper"
+	newHash, err := helper.HashPassword("cakra123") 
+	if err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal memproses password", nil)
+		return
+	}
+
+	// 3. Update Database
+	if err := ec.DB.Model(&user).Update("password_hash", newHash).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal mereset password", nil)
+		return
+	}
+
+	Response(c, http.StatusOK, "Password berhasil direset menjadi 'cakra123'", nil)
+}

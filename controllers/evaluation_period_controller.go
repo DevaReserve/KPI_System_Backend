@@ -1,13 +1,13 @@
 package controllers
 
 import (
-	"KPI_System_Backend/logger" 
+	"KPI_System_Backend/logger"
 	"KPI_System_Backend/models"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap" 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -24,8 +24,6 @@ type PeriodRequest struct {
 	StartDate time.Time `json:"start_date" binding:"required"`
 	EndDate   time.Time `json:"end_date" binding:"required"`
 }
-
-// ... (Create, GetAll, Get, Update, Delete sama seperti sebelumnya) ...
 
 func (pc *EvaluationPeriodController) CreatePeriod(c *gin.Context) {
 	var req PeriodRequest
@@ -89,10 +87,6 @@ func (pc *EvaluationPeriodController) UpdatePeriod(c *gin.Context) {
 		Response(c, http.StatusBadRequest, "Format request tidak valid", err.Error())
 		return
 	}
-	if req.EndDate.Before(req.StartDate) {
-		Response(c, http.StatusBadRequest, "Tanggal Selesai harus setelah Tanggal Mulai", nil)
-		return
-	}
 	period.Name = req.Name
 	period.StartDate = req.StartDate
 	period.EndDate = req.EndDate
@@ -123,21 +117,12 @@ func (pc *EvaluationPeriodController) DeletePeriod(c *gin.Context) {
 
 func (pc *EvaluationPeriodController) SetActivePeriod(c *gin.Context) {
 	id := c.Param("id")
-	
-	// Gunakan Raw SQL atomic update
-	err := pc.DB.Exec(`
-		UPDATE evaluation_periods 
-		SET is_active = CASE 
-			WHEN id = ? THEN 1 
-			ELSE 0 
-		END
-	`, id).Error
+	err := pc.DB.Exec(`UPDATE evaluation_periods SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END`, id).Error
 
 	if err != nil {
-		logger.Error("Gagal update periode", zap.Error(err)) // Sekarang ini tidak akan error
+		logger.Error("Gagal update periode", zap.Error(err))
 		Response(c, http.StatusInternalServerError, "Gagal mengubah status periode", nil)
 		return
 	}
-	
 	Response(c, http.StatusOK, "Periode berhasil diaktifkan", nil)
 }
