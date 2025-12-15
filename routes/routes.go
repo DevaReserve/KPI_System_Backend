@@ -99,11 +99,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			managerRoutes.PUT("/evaluations/:id/submit", managerController.SubmitEvaluation)
 		}
 
-		// ---------------------------------------------------------
+		// --------------------------------------------	-------------
 		// EMPLOYEE ROUTES (Hanya Employee)
 		// ---------------------------------------------------------
 		employeeRoutes := protected.Group("/employee")
-		employeeRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleEmployee))
+		employeeRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleEmployee, db_var.RoleManager, db_var.RoleAdmin))
 		{
 			employeeRoutes.GET("/history", myPerformanceController.GetMyPerformanceHistory)
 			employeeRoutes.GET("/latest", myPerformanceController.GetMyLatestPerformance)

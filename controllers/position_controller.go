@@ -54,8 +54,8 @@ func (pc *PositionController) GetAllPositions(c *gin.Context) {
 func (pc *PositionController) UpdatePosition(c *gin.Context) {
 	id := c.Param("id")
 	
-	// FIX: Deklarasi variabel di luar blok if
-	var position models.Position 
+	// FIX: Deklarasi variabel di sini agar dikenali di seluruh fungsi
+	var position models.Position
 
 	if err := pc.DB.First(&position, id).Error; err != nil {
 		Response(c, http.StatusNotFound, "Jabatan tidak ditemukan", nil)

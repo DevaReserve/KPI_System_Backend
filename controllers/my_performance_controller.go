@@ -3,6 +3,8 @@ package controllers
 import (
 	"KPI_System_Backend/db_var"
 	"KPI_System_Backend/models"
+	"errors"
+	"fmt" // Tambahkan fmt untuk debugging
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,7 +15,6 @@ type MyPerformanceController struct {
 	DB *gorm.DB
 }
 
-// NewMyPerformanceController adalah "constructor"
 func NewMyPerformanceController(db *gorm.DB) *MyPerformanceController {
 	return &MyPerformanceController{DB: db}
 }
@@ -22,11 +23,33 @@ func NewMyPerformanceController(db *gorm.DB) *MyPerformanceController {
 
 // getEmployeeIDFromToken: Mengambil EmployeeID yang login dari token
 func (pc *MyPerformanceController) getEmployeeIDFromToken(c *gin.Context) (uint, error) {
-	userID, _ := c.Get("userID")
+	// 1. Ambil data dari Context (diset oleh Middleware)
+	val, exists := c.Get("userID")
+	if !exists {
+		return 0, errors.New("user ID tidak ditemukan dalam token context")
+	}
+
+	// 2. Pastikan tipe datanya uint (sesuai middleware)
+	// Gunakan type assertion yang aman
+	userID, ok := val.(uint)
+	if !ok {
+		// Coba casting dari float64 (kadang JWT numeric jadi float)
+		if floatVal, okFloat := val.(float64); okFloat {
+			userID = uint(floatVal)
+		} else {
+			return 0, errors.New("format user ID invalid")
+		}
+	}
+
+	// 3. Cari User di Database
 	var user models.User
 	if err := pc.DB.First(&user, userID).Error; err != nil {
-		return 0, err
+		return 0, err // User tidak ada di tabel users
 	}
+
+	// 4. Debugging: Cetak di terminal server
+	fmt.Printf("[DEBUG] Login sebagai UserID: %d, EmployeeID: %d, Role: %s\n", user.ID, user.EmployeeID, user.Role)
+
 	return user.EmployeeID, nil
 }
 
@@ -34,22 +57,20 @@ func (pc *MyPerformanceController) getEmployeeIDFromToken(c *gin.Context) (uint,
 
 // GetMyPerformanceHistory: Mendapatkan riwayat semua evaluasi yang sudah selesai
 // @Route: GET /api/employee/history
-// GetMyPerformanceHistory: Mendapatkan riwayat semua evaluasi yang sudah selesai
-// @Route: GET /api/employee/history
 func (pc *MyPerformanceController) GetMyPerformanceHistory(c *gin.Context) {
 	// 1. Dapatkan EmployeeID dari token
 	employeeID, err := pc.getEmployeeIDFromToken(c)
 	if err != nil {
-		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan", nil)
+		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan (Token Invalid)", nil)
 		return
 	}
 
+	fmt.Printf("[DEBUG] Mencari Evaluasi untuk EmployeeID: %d dengan status 'submitted'\n", employeeID)
+
 	// 2. Query data evaluasi
-	// Kita gunakan Preload dengan klausa Unscoped (jika ada soft delete) atau left join manual
-	// Tapi untuk amannya, kita ambil evaluasi dulu, baru mapping periodenya
 	var evaluations []models.Evaluation
 	if err := pc.DB.
-		Where("employee_id = ? AND status = ?", employeeID, db_var.EvaluationStatusSubmitted).
+		Where("employee_id = ? AND status = ?", employeeID, "submitted"). // Hardcode string 'submitted' biar aman
 		Order("submitted_at desc").
 		Find(&evaluations).Error; err != nil {
 		
@@ -57,7 +78,9 @@ func (pc *MyPerformanceController) GetMyPerformanceHistory(c *gin.Context) {
 		return
 	}
 
-	// 3. Mapping response (Manual Join agar data tidak hilang jika periode terhapus)
+	fmt.Printf("[DEBUG] Ditemukan %d data evaluasi\n", len(evaluations))
+
+	// 3. Mapping response
 	type HistoryResponse struct {
 		models.Evaluation
 		PeriodName string `json:"period_name"`
@@ -70,7 +93,6 @@ func (pc *MyPerformanceController) GetMyPerformanceHistory(c *gin.Context) {
 		// Cari nama periode manual
 		if e.PeriodID != 0 {
 			var p models.EvaluationPeriod
-			// Gunakan Unscoped() agar jika periode sudah di-soft delete, namanya tetap muncul
 			if err := pc.DB.Unscoped().First(&p, e.PeriodID).Error; err == nil {
 				pName = p.Name
 			}
@@ -83,27 +105,26 @@ func (pc *MyPerformanceController) GetMyPerformanceHistory(c *gin.Context) {
 		response = append(response, res)
 	}
 
-	// Pastikan return array kosong [] bukan null jika tidak ada data
+	// Return array kosong [] jika null
 	if response == nil {
 		response = []HistoryResponse{}
 	}
 
 	Response(c, http.StatusOK, "Riwayat evaluasi berhasil diambil", response)
 }
+
 // GetMyLatestPerformance: Mendapatkan 1 evaluasi terbaru (untuk dashboard)
 // @Route: GET /api/employee/latest
 func (pc *MyPerformanceController) GetMyLatestPerformance(c *gin.Context) {
-	// 1. Dapatkan EmployeeID dari token
 	employeeID, err := pc.getEmployeeIDFromToken(c)
 	if err != nil {
 		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan", nil)
 		return
 	}
 
-	// 2. Cari 1 evaluasi terbaru
 	var evaluation models.Evaluation
 	if err := pc.DB.Preload("Period").
-		Where("employee_id = ? AND status = ?", employeeID, db_var.EvaluationStatusSubmitted).
+		Where("employee_id = ? AND status = ?", employeeID, "submitted").
 		Order("submitted_at desc").
 		First(&evaluation).Error; err != nil {
 		
@@ -118,60 +139,57 @@ func (pc *MyPerformanceController) GetMyLatestPerformance(c *gin.Context) {
 	Response(c, http.StatusOK, "Evaluasi terbaru berhasil diambil", evaluation)
 }
 
-
 // GetMyEvaluationDetail: Mendapatkan detail lengkap 1 evaluasi
 // @Route: GET /api/employee/evaluations/:id
 func (pc *MyPerformanceController) GetMyEvaluationDetail(c *gin.Context) {
-	// 1. Ambil ID Evaluasi dari URL
 	id := c.Param("id")
 
-	// 2. Dapatkan EmployeeID dari token (untuk keamanan)
 	employeeID, err := pc.getEmployeeIDFromToken(c)
 	if err != nil {
 		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan", nil)
 		return
 	}
 
-	// 3. Ambil data evaluasi utama
 	var evaluation models.Evaluation
 	if err := pc.DB.First(&evaluation, id).Error; err != nil {
 		Response(c, http.StatusNotFound, "Evaluasi tidak ditemukan", nil)
 		return
 	}
 
-	// 4. --- Pengecekan Keamanan Ganda ---
-	// 4a. Cek apakah ini MILIKNYA
-	if evaluation.EmployeeID != employeeID {
+	// Pengecekan Keamanan:
+	// Izinkan jika ini milik pegawai yg login OR jika yg login adalah Admin/Manager (untuk view detail)
+	role, _ := c.Get("role")
+	userRole := role.(string)
+
+	isOwner := evaluation.EmployeeID == employeeID
+	isEvaluator := (userRole == db_var.RoleAdmin || userRole == db_var.RoleManager)
+
+	if !isOwner && !isEvaluator {
 		Response(c, http.StatusForbidden, "Anda tidak memiliki akses ke evaluasi ini", nil)
 		return
 	}
-	// 4b. Cek apakah sudah di-SUBMIT (pegawai tidak boleh lihat draf)
-	if evaluation.Status != db_var.EvaluationStatusSubmitted {
-		Response(c, http.StatusForbidden, "Evaluasi ini belum selesai dinilai", nil)
-		return
-	}
 
-	// 5. Ambil semua data pendukung (sama seperti di manager_controller)
-	
-	// Ambil skor, indikator, dan divisi
+	// Ambil data pendukung
 	var scores []models.EvaluationScore
 	pc.DB.Preload("Indicator").
 		Preload("Indicator.Division").
 		Where("evaluation_id = ?", id).
 		Find(&scores)
 
-	// Ambil data penilai (evaluator/manajer)
 	var evaluator models.Employee
 	pc.DB.First(&evaluator, evaluation.EvaluatorID)
 
-	// Ambil data periode
 	var period models.EvaluationPeriod
 	pc.DB.First(&period, evaluation.PeriodID)
+	
+	// Tambahan: Ambil data pegawai yang dinilai (agar nama muncul di header saat admin lihat detail)
+	var employeeDetail models.Employee
+	pc.DB.First(&employeeDetail, evaluation.EmployeeID)
 
-	// Gabungkan semua data
 	response := gin.H{
 		"evaluation_header": evaluation,
-		"evaluator_name":    evaluator.Name, // Cukup namanya saja
+		"evaluator_name":    evaluator.Name,
+		"employee_detail":   employeeDetail, // Penting untuk header
 		"period_detail":     period,
 		"scores":            scores,
 	}
