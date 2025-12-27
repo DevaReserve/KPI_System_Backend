@@ -20,8 +20,6 @@ func NewEmployeeController(db *gorm.DB) *EmployeeController {
 	return &EmployeeController{DB: db}
 }
 
-// --- Struct untuk Request Binding ---
-
 type EmployeeCreateRequest struct {
 	// Data untuk models.Employee
 	NIP                string    `json:"nip" binding:"required"`

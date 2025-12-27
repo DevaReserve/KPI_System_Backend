@@ -21,21 +21,29 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	positionController := controllers.NewPositionController(db)
 	reportController := controllers.NewReportController(db)
 	myPerformanceController := controllers.NewMyPerformanceController(db)
+	
+	// Controller Baru untuk Upload
+	uploadCtrl := controllers.NewUploadController(db)
+	achievementsCtrl := controllers.NewAchievementController(db)
 
-	// Public Routes
+	// ---------------------------------------------------------
+	// PUBLIC ROUTES
+	// ---------------------------------------------------------
 	public := router.Group("/api")
-	public.Use(middleware.CORSMiddleware()) // Pastikan CORS aktif
+	public.Use(middleware.CORSMiddleware()) 
 	{
 		public.POST("/auth/login", authController.Login)
 		public.GET("/ping", pingController.Ping)
 	}
 
-	// Protected Routes
+	// ---------------------------------------------------------
+	// PROTECTED ROUTES (Butuh Token)
+	// ---------------------------------------------------------
 	protected := router.Group("/api")
 	protected.Use(middleware.CORSMiddleware())
 	protected.Use(middleware.AuthMiddleware())
 	{
-		// Common Routes
+		// Common Routes (Bisa diakses semua user login)
 		protected.GET("/auth/profile", authController.GetProfile)
 		protected.PUT("/auth/change-password", authController.ChangePassword)
 
@@ -83,12 +91,14 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 
 			// Reports
 			adminRoutes.GET("/reports/evaluations", reportController.GetEvaluationReport)
+
+			// Achevement
+			adminRoutes.GET("/employees/:id/achievements", achievementsCtrl.GetEmployeeAchievements)
 		}
 
 		// ---------------------------------------------------------
-		// MANAGER / ASSESSMENT ROUTES (Bisa Admin & Manager)
+		// MANAGER ROUTES (Admin & Manager)
 		// ---------------------------------------------------------
-		// FIX: Kita izinkan RoleManager DAN RoleAdmin masuk sini
 		managerRoutes := protected.Group("/manager")
 		managerRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleManager, db_var.RoleAdmin))
 		{
@@ -97,17 +107,29 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			managerRoutes.POST("/evaluations/start", managerController.StartEvaluation)
 			managerRoutes.GET("/evaluations/:id", managerController.GetEvaluationDetail)
 			managerRoutes.PUT("/evaluations/:id/submit", managerController.SubmitEvaluation)
+
+			// Achievement
+			managerRoutes.GET("/employees/:id/achievements", achievementsCtrl.GetEmployeeAchievements)
 		}
 
-		// --------------------------------------------	-------------
-		// EMPLOYEE ROUTES (Hanya Employee)
+		// ---------------------------------------------------------
+		// EMPLOYEE ROUTES (Semua Role bisa akses riwayat sendiri)
 		// ---------------------------------------------------------
 		employeeRoutes := protected.Group("/employee")
-		employeeRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleEmployee, db_var.RoleManager, db_var.RoleAdmin))
-		{
-			employeeRoutes.GET("/history", myPerformanceController.GetMyPerformanceHistory)
-			employeeRoutes.GET("/latest", myPerformanceController.GetMyLatestPerformance)
-			employeeRoutes.GET("/evaluations/:id", myPerformanceController.GetMyEvaluationDetail)
-		}
+        employeeRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleEmployee, db_var.RoleManager, db_var.RoleAdmin))
+        {
+            employeeRoutes.GET("/history", myPerformanceController.GetMyPerformanceHistory)
+            employeeRoutes.GET("/latest", myPerformanceController.GetMyLatestPerformance)
+            employeeRoutes.GET("/evaluations/:id", myPerformanceController.GetMyEvaluationDetail)
+            
+            // Upload Foto Profil
+            employeeRoutes.POST("/upload-avatar", uploadCtrl.UploadProfilePicture)
+
+            // --- 2. TAMBAHKAN ROUTE PRESTASI DISINI ---
+            employeeRoutes.GET("/achievements", achievementsCtrl.GetMyAchievements)
+            employeeRoutes.POST("/achievements", achievementsCtrl.CreateAchievement)
+            employeeRoutes.DELETE("/achievements/:id", achievementsCtrl.DeleteAchievement)
+			employeeRoutes.PUT("/achievements/:id", achievementsCtrl.UpdateAchievement)
+        }
 	}
 }
