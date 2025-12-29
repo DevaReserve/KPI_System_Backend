@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -116,28 +117,30 @@ func (ac *AchievementController) GetMyAchievements(c *gin.Context) {
 // DeleteAchievement
 func (ac *AchievementController) DeleteAchievement(c *gin.Context) {
 	id := c.Param("id")
-
-	// Ambil Actor (Pelaku penghapusan)
 	actorID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Unauthorized"})
 		return
 	}
 
-	// Cari data dulu sebelum dihapus (Agar kita bisa mencatat JUDUL apa yang dihapus di log)
 	var achievement models.EmployeeAchievement
 	if err := ac.DB.First(&achievement, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Data tidak ditemukan"})
 		return
 	}
 
-	// Proses Hapus
+	// [CLEANUP] Hapus file fisik sebelum hapus data DB
+	if achievement.FileURL != "" {
+		oldFilename := filepath.Base(achievement.FileURL)
+		oldPath := "./uploads/documents/" + oldFilename
+		_ = os.Remove(oldPath)
+	}
+
 	if err := ac.DB.Delete(&achievement).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menghapus"})
 		return
 	}
 
-	// --- [AUDIT TRAIL] ---
 	if idUint, ok := actorID.(uint); ok {
 		helper.LogActivity(ac.DB, idUint, "DELETE_ACHIEVEMENT", "Menghapus prestasi: "+achievement.Title, c.ClientIP())
 	}
