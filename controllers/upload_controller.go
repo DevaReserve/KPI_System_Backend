@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"KPI_System_Backend/helper" // <--- Import Helper
+	"KPI_System_Backend/models"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -9,8 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	
-	"KPI_System_Backend/models"
 )
 
 type UploadController struct {
@@ -71,6 +71,12 @@ func (ctrl *UploadController) UploadProfilePicture(c *gin.Context) {
 		return
 	}
 
+    // --- [AUDIT TRAIL] ---
+    // Mencatat penggantian foto profil
+    if idUint, ok := userID.(uint); ok {
+	    helper.LogActivity(ctrl.DB, idUint, "UPDATE_PROFILE_PICTURE", "Mengganti foto profil", c.ClientIP())
+    }
+
 	c.JSON(http.StatusOK, gin.H{
 		"status": "success",
 		"data": gin.H{
@@ -81,15 +87,14 @@ func (ctrl *UploadController) UploadProfilePicture(c *gin.Context) {
 
 func (ac *AchievementController) UpdateAchievement(c *gin.Context) {
 	id := c.Param("id")
-	
-	// 1. Cari data prestasi lama
 	var achievement models.EmployeeAchievement
 	if err := ac.DB.First(&achievement, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Data tidak ditemukan"})
 		return
 	}
 
-	// 2. Ambil data teks dari form (Jika ada perubahan)
+    actorID, _ := c.Get("userID") // Ambil user ID untuk log
+
 	title := c.PostForm("title")
 	description := c.PostForm("description")
 	dateStr := c.PostForm("date")
@@ -101,18 +106,12 @@ func (ac *AchievementController) UpdateAchievement(c *gin.Context) {
 		if err == nil { achievement.Date = date }
 	}
 
-	// 3. Cek apakah user mengupload file baru? (LOGIKA UTAMA)
 	file, err := c.FormFile("file")
-	
-	// Jika tidak ada error (berarti ada file baru), maka proses upload
 	if err == nil && file != nil {
-		// Validasi Ukuran
 		if file.Size > 5*1024*1024 {
 			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "File maksimal 5MB"})
 			return
 		}
-
-		// Simpan File Baru
 		ext := strings.ToLower(filepath.Ext(file.Filename))
 		filename := uuid.New().String() + ext
 		savePath := "./uploads/documents/" + filename
@@ -121,20 +120,18 @@ func (ac *AchievementController) UpdateAchievement(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file baru"})
 			return
 		}
-
-		// Hapus file lama (Opsional, agar server tidak penuh sampah)
-		// os.Remove("." + achievement.FileURL) 
-
-		// Update URL di database
 		achievement.FileURL = "http://localhost:8080/uploads/documents/" + filename
 	}
-	// Jika user tidak upload file baru, achievement.FileURL biarkan tetap yang lama
 
-	// 4. Simpan perubahan ke Database
 	if err := ac.DB.Save(&achievement).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal update data"})
 		return
 	}
+
+    // --- [AUDIT TRAIL] ---
+    if idUint, ok := actorID.(uint); ok {
+	    helper.LogActivity(ac.DB, idUint, "UPDATE_ACHIEVEMENT", "Mengupdate data prestasi: "+achievement.Title, c.ClientIP())
+    }
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "data": achievement})
 }

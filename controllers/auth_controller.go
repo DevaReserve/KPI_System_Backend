@@ -3,7 +3,7 @@ package controllers
 import (
 	"net/http"
 	"time"
-	"KPI_System_Backend/helper"
+	"KPI_System_Backend/helper" // Pastikan import ini ada
 	"KPI_System_Backend/logger"
 	"KPI_System_Backend/models"
 
@@ -54,6 +54,10 @@ func (ac *AuthController) Login(c *gin.Context) {
 	// Update last login
 	ac.DB.Model(&user).Update("last_login", time.Now())
 
+	// --- [AUDIT TRAIL] LOG ACTIVITY ---
+    // Mencatat login sukses sangat penting untuk keamanan
+	helper.LogActivity(ac.DB, user.ID, "LOGIN", "User berhasil login", c.ClientIP())
+
 	loginResp := models.LoginResponse{
 		Token: token,
 		User:  user,
@@ -76,6 +80,7 @@ func (ac *AuthController) GetProfile(c *gin.Context) {
 		return
 	}
 
+    // [ANTI-SPAM]: Tidak perlu log untuk Read (Get Profile)
 	Response(c, http.StatusOK, "Profile retrieved successfully", user)
 }
 
@@ -124,6 +129,12 @@ func (ac *AuthController) ChangePassword(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal mengupdate password", nil)
 		return
 	}
+
+    // --- [AUDIT TRAIL] ---
+    // Aksi sensitif seperti ganti password wajib dicatat
+    if idUint, ok := userID.(uint); ok {
+	    helper.LogActivity(ac.DB, idUint, "CHANGE_PASSWORD", "User mengubah password", c.ClientIP())
+    }
 
 	Response(c, http.StatusOK, "Password berhasil diubah", nil)
 }

@@ -37,13 +37,14 @@ func InitDB() (*gorm.DB, error) {
 	err = db.AutoMigrate(
 		&models.Division{},
 		&models.Position{},
-		&models.Employee{},            // Akan otomatis tambah kolom profile_picture_url
+		&models.Employee{},
 		&models.User{},
 		&models.EvaluationPeriod{},
 		&models.PerformanceIndicator{},
 		&models.Evaluation{},
 		&models.EvaluationScore{},
-		&models.EmployeeAchievement{}, // <-- BARU: Tabel Prestasi
+		&models.EmployeeAchievement{},
+		&models.ActivityLog{},
 	)
 	
 	if err != nil {

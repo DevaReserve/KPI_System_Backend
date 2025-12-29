@@ -33,3 +33,19 @@ config.local.json
 .env
 .env.*
 .env.example
+
+# Uploads & User Generated Content
+uploads/*
+
+# sub-directory (images & documents)
+!uploads/images/
+!uploads/documents/
+
+# Ignore all files in the sub-directories
+uploads/images/*
+uploads/documents/*
+
+# But keep .gitkeep files
+!uploads/.gitkeep
+!uploads/images/.gitkeep
+!uploads/documents/.gitkeep

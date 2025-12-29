@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"KPI_System_Backend/db_var"
+    "KPI_System_Backend/helper" 
 	"KPI_System_Backend/models"
 	"net/http"
 	"time"
@@ -9,17 +10,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
-
+	
 type ManagerController struct {
 	DB *gorm.DB
 }
 
-// NewManagerController adalah "constructor"
 func NewManagerController(db *gorm.DB) *ManagerController {
 	return &ManagerController{DB: db}
 }
-
-// --- Struct untuk Request Binding ---
 
 type EvaluationSubmitRequest struct {
 	Feedback string `json:"feedback"`
@@ -30,9 +28,6 @@ type EvaluationSubmitRequest struct {
 	} `json:"scores" binding:"required"`
 }
 
-// --- Helper Functions ---
-
-// getActivePeriod: Helper internal untuk mendapatkan periode yang sedang aktif
 func (mc *ManagerController) getActivePeriod() (*models.EvaluationPeriod, error) {
 	var activePeriod models.EvaluationPeriod
 	if err := mc.DB.Where("is_active = ?", true).First(&activePeriod).Error; err != nil {
@@ -44,10 +39,7 @@ func (mc *ManagerController) getActivePeriod() (*models.EvaluationPeriod, error)
 	return &activePeriod, nil
 }
 
-// --- Manager Functions ---
-
-// GetMyTeam: Mendapatkan daftar pegawai yang harus dinilai oleh manajer
-// @Route: GET /api/manager/my-team
+// GetMyTeam: [ANTI-SPAM] Read Only -> No Log
 func (mc *ManagerController) GetMyTeam(c *gin.Context) {
 	managerUserID, _ := c.Get("userID")
 
@@ -72,8 +64,7 @@ func (mc *ManagerController) GetMyTeam(c *gin.Context) {
 	Response(c, http.StatusOK, "Data tim berhasil diambil", team)
 }
 
-// GetTeamEvaluationStatus: Mendapatkan status evaluasi tim untuk periode aktif
-// @Route: GET /api/manager/team-status
+// GetTeamEvaluationStatus: [ANTI-SPAM] Read Only -> No Log
 func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
 	activePeriod, err := mc.getActivePeriod()
 	if err != nil {
@@ -129,9 +120,7 @@ func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
 	Response(c, http.StatusOK, "Status evaluasi tim berhasil diambil", response)
 }
 
-
-// StartEvaluation: Membuat draf evaluasi untuk seorang pegawai
-// @Route: POST /api/manager/evaluations/start
+// StartEvaluation: [ANTI-SPAM] Ini hanya inisialisasi draft, tidak perlu dicatat agar log tidak penuh.
 func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 	var req struct {
 		EmployeeID uint `json:"employee_id" binding:"required"`
@@ -141,44 +130,35 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 		return
 	}
 
-	// 1. Dapatkan periode aktif
 	activePeriod, err := mc.getActivePeriod()
 	if err != nil {
 		Response(c, http.StatusBadRequest, "Tidak ada periode evaluasi yang aktif", nil)
 		return
 	}
 	
-	// 2. Ambil data manajer (evaluator)
 	managerUserID, _ := c.Get("userID")
 	var managerUser models.User
 	mc.DB.First(&managerUser, managerUserID)
 	evaluatorEmployeeID := managerUser.EmployeeID
 	
-	// 3. Ambil data pegawai yang akan dinilai
 	var employee models.Employee
 	if err := mc.DB.First(&employee, req.EmployeeID).Error; err != nil {
 		Response(c, http.StatusNotFound, "Pegawai tidak ditemukan", nil)
 		return
 	}
 	
-	// 4. Keamanan: Pastikan manajer ini adalah atasan si pegawai
 	if employee.DirectSupervisorID == nil || *employee.DirectSupervisorID != evaluatorEmployeeID {
 		Response(c, http.StatusForbidden, "Anda bukan atasan langsung dari pegawai ini", nil)
 		return
 	}
 	
-	// 5. Cek apakah evaluasi sudah ada
 	var existingEval models.Evaluation
 	if err := mc.DB.Where("employee_id = ? AND period_id = ?", req.EmployeeID, activePeriod.ID).First(&existingEval).Error; err == nil {
 		Response(c, http.StatusConflict, "Evaluasi untuk pegawai ini di periode ini sudah ada", existingEval)
 		return
 	}
 
-	// 6. Dapatkan semua Indikator yang relevan (PERBAIKAN LOGIKA OR)
 	var indicators []models.PerformanceIndicator
-	
-	// Gunakan Grouped Condition agar logika query benar:
-	// SELECT * FROM indicators WHERE (type = 'umum') OR (type = 'spesifik' AND division_id = X)
 	if err := mc.DB.Where(
 		mc.DB.Where("indicator_type = ?", db_var.IndicatorTypeUmum).
 		Or("indicator_type = ? AND division_id = ?", db_var.IndicatorTypeSpesifik, employee.DivisionID),
@@ -192,10 +172,8 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 		return
 	}
 	
-	// 7. Mulai Transaksi
 	tx := mc.DB.Begin()
 	
-	// 7a. Buat 'Evaluation' (header)
 	evaluation := models.Evaluation{
 		EmployeeID:  req.EmployeeID,
 		EvaluatorID: evaluatorEmployeeID,
@@ -209,13 +187,12 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 		return
 	}
 
-	// 7b. Buat 'EvaluationScore' (detail) untuk setiap indikator
 	var scores []models.EvaluationScore
 	for _, indicator := range indicators {
 		score := models.EvaluationScore{
-			EvaluationID:  evaluation.ID,
-			IndicatorID:   indicator.ID,
-			Score:         0,
+			EvaluationID:   evaluation.ID,
+			IndicatorID:    indicator.ID,
+			Score:          0,
 			ConvertedScore: 0,
 		}
 		scores = append(scores, score)
@@ -227,14 +204,12 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 		return
 	}
 
-	// 8. Commit Transaksi
 	tx.Commit()
 
 	Response(c, http.StatusCreated, "Draf evaluasi berhasil dibuat", gin.H{"evaluation_id": evaluation.ID})
 }
 
-// GetEvaluationDetail: Mengambil form evaluasi yang siap diisi
-// @Route: GET /api/manager/evaluations/:id
+// GetEvaluationDetail: [ANTI-SPAM] Read Only -> No Log
 func (mc *ManagerController) GetEvaluationDetail(c *gin.Context) {
 	id := c.Param("id")
 	
@@ -278,9 +253,7 @@ func (mc *ManagerController) GetEvaluationDetail(c *gin.Context) {
 	Response(c, http.StatusOK, "Detail evaluasi berhasil diambil", response)
 }
 
-
 // SubmitEvaluation: Menyimpan & mengirimkan form evaluasi
-// @Route: PUT /api/manager/evaluations/:id/submit
 func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 	id := c.Param("id")
 
@@ -302,6 +275,10 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 		Response(c, http.StatusBadRequest, "Evaluasi ini sudah disubmit sebelumnya", nil)
 		return
 	}
+
+    // Ambil nama pegawai yang dinilai untuk log (opsional, tapi informatif)
+    var targetEmployee models.Employee
+    mc.DB.First(&targetEmployee, evaluation.EmployeeID)
 
 	var req EvaluationSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -351,6 +328,12 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
 		return
 	}
+
+    // --- [AUDIT TRAIL] ---
+    // INI SANGAT PENTING: Mencatat bahwa manajer telah menyelesaikan penilaian
+    if idUint, ok := managerUserID.(uint); ok {
+	    helper.LogActivity(mc.DB, idUint, "SUBMIT_EVALUATION", "Menilai pegawai: "+targetEmployee.Name, c.ClientIP())
+    }
 
 	Response(c, http.StatusOK, "Evaluasi berhasil disubmit", evaluation)
 }

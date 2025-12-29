@@ -21,6 +21,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	positionController := controllers.NewPositionController(db)
 	reportController := controllers.NewReportController(db)
 	myPerformanceController := controllers.NewMyPerformanceController(db)
+	activityCtrl := controllers.NewActivityController(db)
 	
 	// Controller Baru untuk Upload
 	uploadCtrl := controllers.NewUploadController(db)
@@ -94,6 +95,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 
 			// Achevement
 			adminRoutes.GET("/employees/:id/achievements", achievementsCtrl.GetEmployeeAchievements)
+
+			// Activity Logs
+			adminRoutes.GET("/activity-logs", activityCtrl.GetAllLogs)
 		}
 
 		// ---------------------------------------------------------

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"KPI_System_Backend/helper" // <--- Jangan lupa import helper
 	"KPI_System_Backend/models"
 )
 
@@ -89,10 +90,15 @@ func (ac *AchievementController) CreateAchievement(c *gin.Context) {
 		return
 	}
 
+	// --- [AUDIT TRAIL] ---
+	// Kita gunakan user.ID (uint) langsung karena sudah di-fetch di atas
+	helper.LogActivity(ac.DB, user.ID, "CREATE_ACHIEVEMENT", "Mengupload prestasi: "+title, c.ClientIP())
+
 	c.JSON(http.StatusCreated, gin.H{"status": "success", "data": achievement})
 }
 
 // GetMyAchievements: Lihat list prestasi sendiri
+// [ANTI-SPAM]: Tidak perlu ada LogActivity disini (Read Only)
 func (ac *AchievementController) GetMyAchievements(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	var user models.User
@@ -110,24 +116,46 @@ func (ac *AchievementController) GetMyAchievements(c *gin.Context) {
 // DeleteAchievement
 func (ac *AchievementController) DeleteAchievement(c *gin.Context) {
 	id := c.Param("id")
-	if err := ac.DB.Delete(&models.EmployeeAchievement{}, id).Error; err != nil {
+
+	// Ambil Actor (Pelaku penghapusan)
+	actorID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Unauthorized"})
+		return
+	}
+
+	// Cari data dulu sebelum dihapus (Agar kita bisa mencatat JUDUL apa yang dihapus di log)
+	var achievement models.EmployeeAchievement
+	if err := ac.DB.First(&achievement, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Data tidak ditemukan"})
+		return
+	}
+
+	// Proses Hapus
+	if err := ac.DB.Delete(&achievement).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menghapus"})
 		return
 	}
+
+	// --- [AUDIT TRAIL] ---
+	if idUint, ok := actorID.(uint); ok {
+		helper.LogActivity(ac.DB, idUint, "DELETE_ACHIEVEMENT", "Menghapus prestasi: "+achievement.Title, c.ClientIP())
+	}
+
 	c.JSON(http.StatusOK, gin.H{"status": "success", "message": "Terhapus"})
 }
 
+// GetEmployeeAchievements: Admin melihat prestasi pegawai
+// [ANTI-SPAM]: Tidak perlu ada LogActivity disini (Read Only)
 func (ac *AchievementController) GetEmployeeAchievements(c *gin.Context) {
-    // PENTING: Ambil ID dari URL (contoh: /admin/employees/5/achievements)
-    targetEmployeeID := c.Param("id") 
+	targetEmployeeID := c.Param("id")
 
-    var achievements []models.EmployeeAchievement
-    
-    // Query berdasarkan employee_id yang didapat dari URL
-    if err := ac.DB.Where("employee_id = ?", targetEmployeeID).Order("date desc").Find(&achievements).Error; err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mengambil data"})
-        return
-    }
+	var achievements []models.EmployeeAchievement
 
-    c.JSON(http.StatusOK, gin.H{"status": "success", "data": achievements})
+	if err := ac.DB.Where("employee_id = ?", targetEmployeeID).Order("date desc").Find(&achievements).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mengambil data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success", "data": achievements})
 }

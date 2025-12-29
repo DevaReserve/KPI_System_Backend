@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"KPI_System_Backend/helper" // <--- Import Helper
 	"KPI_System_Backend/logger"
 	"KPI_System_Backend/models"
 	"net/http"
@@ -45,6 +46,13 @@ func (pc *EvaluationPeriodController) CreatePeriod(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal menyimpan periode", nil)
 		return
 	}
+
+    // --- [AUDIT TRAIL] ---
+    actorID, _ := c.Get("userID")
+    if idUint, ok := actorID.(uint); ok {
+	    helper.LogActivity(pc.DB, idUint, "CREATE_PERIOD", "Membuat periode evaluasi: "+period.Name, c.ClientIP())
+    }
+
 	Response(c, http.StatusCreated, "Periode berhasil dibuat", period)
 }
 
@@ -94,11 +102,23 @@ func (pc *EvaluationPeriodController) UpdatePeriod(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal memperbarui periode", nil)
 		return
 	}
+
+    // --- [AUDIT TRAIL] ---
+    actorID, _ := c.Get("userID")
+    if idUint, ok := actorID.(uint); ok {
+	    helper.LogActivity(pc.DB, idUint, "UPDATE_PERIOD", "Mengupdate periode evaluasi: "+period.Name, c.ClientIP())
+    }
+
 	Response(c, http.StatusOK, "Periode berhasil diperbarui", period)
 }
 
 func (pc *EvaluationPeriodController) DeletePeriod(c *gin.Context) {
 	id := c.Param("id")
+    
+    // Ambil data sebelum hapus (untuk log)
+    var period models.EvaluationPeriod
+    pc.DB.First(&period, id)
+
 	var evaluationCount int64
 	if err := pc.DB.Model(&models.Evaluation{}).Where("period_id = ?", id).Count(&evaluationCount).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal memverifikasi penggunaan periode", nil)
@@ -112,11 +132,25 @@ func (pc *EvaluationPeriodController) DeletePeriod(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal menghapus periode", nil)
 		return
 	}
+
+    // --- [AUDIT TRAIL] ---
+    actorID, _ := c.Get("userID")
+    if idUint, ok := actorID.(uint); ok {
+        desc := "Menghapus periode ID " + id
+        if period.Name != "" { desc = "Menghapus periode: " + period.Name }
+	    helper.LogActivity(pc.DB, idUint, "DELETE_PERIOD", desc, c.ClientIP())
+    }
+
 	Response(c, http.StatusOK, "Periode berhasil dihapus", nil)
 }
 
 func (pc *EvaluationPeriodController) SetActivePeriod(c *gin.Context) {
 	id := c.Param("id")
+
+    // Ambil nama periode sebelum diaktifkan (opsional, agar log lebih bagus)
+    var period models.EvaluationPeriod
+    pc.DB.First(&period, id)
+
 	err := pc.DB.Exec(`UPDATE evaluation_periods SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END`, id).Error
 
 	if err != nil {
@@ -124,5 +158,14 @@ func (pc *EvaluationPeriodController) SetActivePeriod(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal mengubah status periode", nil)
 		return
 	}
+
+    // --- [AUDIT TRAIL] ---
+    actorID, _ := c.Get("userID")
+    if idUint, ok := actorID.(uint); ok {
+        desc := "Mengaktifkan periode ID " + id
+        if period.Name != "" { desc = "Mengaktifkan periode evaluasi: " + period.Name }
+	    helper.LogActivity(pc.DB, idUint, "ACTIVATE_PERIOD", desc, c.ClientIP())
+    }
+
 	Response(c, http.StatusOK, "Periode berhasil diaktifkan", nil)
 }

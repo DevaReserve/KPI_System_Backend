@@ -190,10 +190,10 @@ func (ec *EmployeeController) UpdateEmployee(c *gin.Context) {
 	employee.Position = req.Position
 	employee.DirectSupervisorID = req.DirectSupervisorID
 	employee.JoinDate = req.JoinDate
-	employee.IsActive = req.IsActive 
+	employee.IsActive = req.IsActive
 	user.Username = req.Username
 	user.Role = req.Role
-	user.IsActive = req.IsActive 
+	user.IsActive = req.IsActive
 	if err := tx.Save(&employee).Error; err != nil {
 		tx.Rollback()
 		Response(c, http.StatusConflict, "Gagal update pegawai, Email mungkin duplikat", nil)
@@ -208,7 +208,15 @@ func (ec *EmployeeController) UpdateEmployee(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
 		return
 	}
-	user.PasswordHash = "" 
+
+	// --- LOG ACTIVITY (Baris Baru) ---
+	// Ambil ID User yang sedang login (Pelaku Edit)
+	actorID, _ := c.Get("userID")
+	if idUint, ok := actorID.(uint); ok {
+		helper.LogActivity(ec.DB, idUint, "UPDATE_EMPLOYEE", "Mengupdate data pegawai: "+employee.Name, c.ClientIP())
+	}
+
+	user.PasswordHash = ""
 	response := gin.H{"employee": employee, "user": user}
 	Response(c, http.StatusOK, db_var.MsgEmployeeUpdated, response)
 }
