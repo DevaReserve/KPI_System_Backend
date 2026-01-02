@@ -91,33 +91,35 @@ func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
 	}
 
 	type TeamStatusResponse struct {
-		EmployeeID       uint   `json:"employee_id"`
-		EmployeeName     string `json:"employee_name"`
-		EvaluationID     *uint  `json:"evaluation_id"`
-		EvaluationStatus string `json:"evaluation_status"`
+		EmployeeID        uint   `json:"employee_id"`
+        EmployeeName      string `json:"employee_name"`
+        ProfilePictureURL string `json:"profile_picture_url"` // <--- TAMBAHKAN INI
+        EvaluationID      *uint  `json:"evaluation_id"`
+        EvaluationStatus  string `json:"evaluation_status"`
 	}
 
 	var response []TeamStatusResponse
-	
-	for _, employee := range team {
-		var evaluation models.Evaluation
-		status := TeamStatusResponse{
-			EmployeeID:       employee.ID,
-			EmployeeName:     employee.Name,
-			EvaluationStatus: "Belum Dibuat",
-		}
-		
-		err := mc.DB.Where("employee_id = ? AND period_id = ?", employee.ID, activePeriod.ID).First(&evaluation).Error
-		
-		if err == nil {
-			status.EvaluationID = &evaluation.ID
-			status.EvaluationStatus = evaluation.Status
-		}
-		
-		response = append(response, status)
-	}
-	
-	Response(c, http.StatusOK, "Status evaluasi tim berhasil diambil", response)
+    
+    for _, employee := range team {
+        var evaluation models.Evaluation
+        status := TeamStatusResponse{
+            EmployeeID:        employee.ID,
+            EmployeeName:      employee.Name,
+            ProfilePictureURL: employee.ProfilePictureURL, // <--- ISI DATANYA DARI EMPLOYEE
+            EvaluationStatus:  "Belum Dibuat",
+        }
+        
+        err := mc.DB.Where("employee_id = ? AND period_id = ?", employee.ID, activePeriod.ID).First(&evaluation).Error
+        
+        if err == nil {
+            status.EvaluationID = &evaluation.ID
+            status.EvaluationStatus = evaluation.Status
+        }
+        
+        response = append(response, status)
+    }
+    
+    Response(c, http.StatusOK, "Status evaluasi tim berhasil diambil", response)
 }
 
 // StartEvaluation: [ANTI-SPAM] Ini hanya inisialisasi draft, tidak perlu dicatat agar log tidak penuh.
