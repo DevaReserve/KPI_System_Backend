@@ -45,6 +45,7 @@ func InitDB() (*gorm.DB, error) {
 		&models.EvaluationScore{},
 		&models.EmployeeAchievement{},
 		&models.ActivityLog{},
+		&models.Warning{},
 	)
 	
 	if err != nil {

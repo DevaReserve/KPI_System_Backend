@@ -22,6 +22,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	reportController := controllers.NewReportController(db)
 	myPerformanceController := controllers.NewMyPerformanceController(db)
 	activityCtrl := controllers.NewActivityController(db)
+	warningCtrl := controllers.NewWarningController(db)
 	
 	// Controller Baru untuk Upload
 	uploadCtrl := controllers.NewUploadController(db)
@@ -98,6 +99,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 
 			// Activity Logs
 			adminRoutes.GET("/activity-logs", activityCtrl.GetAllLogs)
+
+			// Warnings
+			adminRoutes.POST("/warnings", warningCtrl.CreateWarning)          			// Terbitkan SP
+            adminRoutes.DELETE("/warnings/:id", warningCtrl.DeleteWarning)    			// Hapus SP
+            adminRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings) // Lihat SP Pegawai
 		}
 
 		// ---------------------------------------------------------
@@ -114,6 +120,10 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 
 			// Achievement
 			managerRoutes.GET("/employees/:id/achievements", achievementsCtrl.GetEmployeeAchievements)
+
+			// Warnings
+			managerRoutes.POST("/warnings", warningCtrl.CreateWarning)
+            managerRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings)
 		}
 
 		// ---------------------------------------------------------
@@ -134,6 +144,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
             employeeRoutes.POST("/achievements", achievementsCtrl.CreateAchievement)
             employeeRoutes.DELETE("/achievements/:id", achievementsCtrl.DeleteAchievement)
 			employeeRoutes.PUT("/achievements/:id", achievementsCtrl.UpdateAchievement)
+
+			// Warnings
+			employeeRoutes.GET("/warnings", warningCtrl.GetMyWarnings)
         }
 	}
 }
