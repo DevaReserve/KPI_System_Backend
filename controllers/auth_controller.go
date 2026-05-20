@@ -21,51 +21,58 @@ func NewAuthController(db *gorm.DB) *AuthController {
 }
 
 func (ac *AuthController) Login(c *gin.Context) {
-	var loginReq models.LoginRequest
-	if err := c.ShouldBindJSON(&loginReq); err != nil {
-		logger.Error("Invalid login request", zap.Error(err))
-		Response(c, http.StatusBadRequest, "Invalid request format", nil)
-		return
-	}
+    var loginReq models.LoginRequest
+    if err := c.ShouldBindJSON(&loginReq); err != nil {
+        logger.Error("Invalid login request", zap.Error(err))
+        Response(c, http.StatusBadRequest, "Invalid request format", nil)
+        return
+    }
 
-	// Find user
-	var user models.User
-	if err := ac.DB.Preload("Employee").Where("username = ? AND is_active = ?", loginReq.Username, true).First(&user).Error; err != nil {
-		logger.Warn("Login attempt for non-existent user", zap.String("username", loginReq.Username))
-		Response(c, http.StatusUnauthorized, "Invalid credentials", nil)
-		return
-	}
+    // 1. Cari user hanya berdasarkan username (Ubah query pencarian)
+    var user models.User
+    if err := ac.DB.Preload("Employee").Where("username = ?", loginReq.Username).First(&user).Error; err != nil {
+        logger.Warn("Login attempt for non-existent user", zap.String("username", loginReq.Username))
+        Response(c, http.StatusUnauthorized, "Username atau password salah", nil)
+        return
+    }
 
-	// Check password
-	if !helper.CheckPasswordHash(loginReq.Password, user.PasswordHash) {
-		logger.Warn("Invalid password attempt", zap.String("username", loginReq.Username))
-		Response(c, http.StatusUnauthorized, "Invalid credentials", nil)
-		return
-	}
+    // 2. CEK STATUS AKTIF (BLOKIR DO) <-- LOGIKA BARU UNTUK FITUR DO
+    if !user.IsActive {
+        logger.Warn("Login attempt by inactive user", zap.String("username", user.Username))
+        Response(c, http.StatusForbidden, "Akses Ditolak. Akun Anda telah dinonaktifkan oleh HRD.", nil)
+        return
+    }
 
-	// Generate JWT token
-	token, err := helper.GenerateJWT(user.ID, user.Username, user.Role)
-	if err != nil {
-		logger.Error("Failed to generate JWT token", zap.Error(err))
-		Response(c, http.StatusInternalServerError, "Login failed", nil)
-		return
-	}
+    // 3. Check password
+    if !helper.CheckPasswordHash(loginReq.Password, user.PasswordHash) {
+        logger.Warn("Invalid password attempt", zap.String("username", loginReq.Username))
+        Response(c, http.StatusUnauthorized, "Username atau password salah", nil)
+        return
+    }
 
-	// Update last login
-	ac.DB.Model(&user).Update("last_login", time.Now())
+    // 4. Generate JWT token (Tambahkan user.IsExecutive di belakang) <-- LOGIKA BARU CEO
+    token, err := helper.GenerateJWT(user.ID, user.Username, user.Role, user.IsExecutive)
+    if err != nil {
+        logger.Error("Failed to generate JWT token", zap.Error(err))
+        Response(c, http.StatusInternalServerError, "Login failed", nil)
+        return
+    }
 
-	// --- [AUDIT TRAIL] LOG ACTIVITY ---
-    // Mencatat login sukses sangat penting untuk keamanan
-	helper.LogActivity(ac.DB, user.ID, "LOGIN", "User berhasil login", c.ClientIP())
+    // Update last login
+    ac.DB.Model(&user).Update("last_login", time.Now())
 
-	loginResp := models.LoginResponse{
-		Token: token,
-		User:  user,
-	}
+    // --- [AUDIT TRAIL] LOG ACTIVITY ---
+    helper.LogActivity(ac.DB, user.ID, "LOGIN", "User berhasil login", c.ClientIP())
 
-	logger.Info("User logged in successfully", zap.String("username", user.Username), zap.String("role", user.Role))
-	Response(c, http.StatusOK, "Login successful", loginResp)
+    loginResp := models.LoginResponse{
+        Token: token,
+        User:  user,
+    }
+
+    logger.Info("User logged in successfully", zap.String("username", user.Username), zap.String("role", user.Role))
+    Response(c, http.StatusOK, "Login successful", loginResp)
 }
+
 
 func (ac *AuthController) GetProfile(c *gin.Context) {
 	userID, exists := c.Get("userID")

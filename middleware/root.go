@@ -1,57 +1,58 @@
 package middleware
 
 import (
-	"KPI_System_Backend/global_var"
-	"KPI_System_Backend/helper"
-	"KPI_System_Backend/logger"
-	"net/http"
-	"strings"
+    "KPI_System_Backend/global_var"
+    "KPI_System_Backend/helper"
+    "KPI_System_Backend/logger"
+    "net/http"
+    "strings"
 
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
+    "github.com/gin-gonic/gin"
+    "go.uber.org/zap"
 )
 
 // AuthMiddleware: Memvalidasi Token
 func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			// Cek query param juga (opsional, kadang berguna untuk download file)
-			authHeader = c.Query("token")
-			if authHeader == "" {
-				c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
-					Status:  http.StatusUnauthorized,
-					Message: "Authorization header required",
-					Data:    nil,
-				})
-				c.Abort()
-				return
-			}
-		}
+    return func(c *gin.Context) {
+        authHeader := c.GetHeader("Authorization")
+        if authHeader == "" {
+            authHeader = c.Query("token")
+            if authHeader == "" {
+                c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
+                    Status:  http.StatusUnauthorized,
+                    Message: "Authorization header required",
+                    Data:    nil,
+                })
+                c.Abort()
+                return
+            }
+        }
 
-		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
-		claims, err := helper.ValidateJWT(tokenString)
-		if err != nil {
-			logger.Warn("Invalid token", zap.Error(err))
-			c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
-				Status:  http.StatusUnauthorized,
-				Message: "Invalid token or expired",
-				Data:    nil,
-			})
-			c.Abort()
-			return
-		}
+        tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+        claims, err := helper.ValidateJWT(tokenString)
+        if err != nil {
+            logger.Warn("Invalid token", zap.Error(err))
+            c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
+                Status:  http.StatusUnauthorized,
+                Message: "Invalid token or expired",
+                Data:    nil,
+            })
+            c.Abort()
+            return
+        }
 
-		// PENTING: Set context keys yang konsisten
-		c.Set("userID", claims.UserID)
-		c.Set("username", claims.Username)
-		// Gunakan "role" (bukan userRole) agar sesuai dengan routes.go logic
-		c.Set("role", claims.Role) 
+        // PENTING: Set context keys yang konsisten
+        c.Set("userID", claims.UserID)
+        c.Set("username", claims.Username)
+        c.Set("role", claims.Role) 
+        
+        // --- 1 BARIS TAMBAHAN BARU DISINI ---
+        // Teruskan status IsExecutive ke dalam context agar bisa dipakai di Controller
+        c.Set("is_executive", claims.IsExecutive) 
 
-		c.Next()
-	}
+        c.Next()
+    }
 }
-
 // CORSMiddleware
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {

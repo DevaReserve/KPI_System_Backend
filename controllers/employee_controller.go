@@ -34,6 +34,7 @@ type EmployeeCreateRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 	Role     string `json:"role" binding:"required"`
+	IsExecutive bool `json:"is_executive"`
 }
 
 // Struct baru untuk Update
@@ -50,6 +51,8 @@ type EmployeeUpdateRequest struct {
 	Username string `json:"username" binding:"required"`
 	Role     string `json:"role" binding:"required"` // "admin", "manager", atau "employee"
 	IsActive bool   `json:"is_active"`
+
+	IsExecutive bool `json:"is_executive"`
 }
 
 // --- CRUD Functions ---
@@ -86,6 +89,7 @@ func (ec *EmployeeController) CreateEmployee(c *gin.Context) {
 		PasswordHash: hashedPassword,
 		Role:         req.Role,
 		IsActive:     true,
+		IsExecutive:  req.IsExecutive,
 	}
 	tx := ec.DB.Begin()
 	if tx.Error != nil {
@@ -119,10 +123,10 @@ func (ec *EmployeeController) GetAllEmployees(c *gin.Context) {
 	
     // Query ini menggabungkan data dari 3 tabel: employees, divisions, dan users
 	query := ec.DB.Model(&models.Employee{}).
-		Select("employees.*, divisions.name as division_name, supervisors.name as supervisor_name, users.username, users.role").
+		Select("employees.*, divisions.name as division_name, supervisors.name as supervisor_name, users.username, users.role, users.is_executive").
 		Joins("left join divisions on divisions.id = employees.division_id").
 		Joins("left join employees as supervisors on supervisors.id = employees.direct_supervisor_id").
-		Joins("left join users on users.employee_id = employees.id") // <--- WAJIB ADA
+		Joins("left join users on users.employee_id = employees.id") 
 
 	if err := query.Scan(&employeeDetails).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal mengambil data pegawai", nil)
@@ -194,6 +198,7 @@ func (ec *EmployeeController) UpdateEmployee(c *gin.Context) {
 	user.Username = req.Username
 	user.Role = req.Role
 	user.IsActive = req.IsActive
+	user.IsExecutive = req.IsExecutive
 	if err := tx.Save(&employee).Error; err != nil {
 		tx.Rollback()
 		Response(c, http.StatusConflict, "Gagal update pegawai, Email mungkin duplikat", nil)

@@ -24,37 +24,40 @@ func CheckPasswordHash(password, hash string) bool {
 // --- JWT Generation & Validation ---
 
 type Claims struct {
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	jwt.RegisteredClaims
+    UserID      uint   `json:"user_id"`
+    Username    string `json:"username"`
+    Role        string `json:"role"`
+    IsExecutive bool   `json:"is_executive"` // <-- 1. TAMBAHAN BARU DISINI
+    jwt.RegisteredClaims
 }
 
-func GenerateJWT(userID uint, username, role string) (string, error) {
-	// Pastikan config sudah terload, jika 0 pakai default
-	expiry := config.JWTExpiry
-	if expiry == 0 {
-		expiry = 24
-	}
-	expirationTime := time.Now().Add(time.Hour * time.Duration(expiry))
+// 2. TAMBAHKAN parameter isExecutive bool di dalam kurung ini
+func GenerateJWT(userID uint, username, role string, isExecutive bool) (string, error) {
+    // Pastikan config sudah terload, jika 0 pakai default
+    expiry := config.JWTExpiry
+    if expiry == 0 {
+        expiry = 24
+    }
+    expirationTime := time.Now().Add(time.Hour * time.Duration(expiry))
 
-	claims := &Claims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-		},
-	}
+    claims := &Claims{
+        UserID:      userID,
+        Username:    username,
+        Role:        role,
+        IsExecutive: isExecutive, // <-- 3. MASUKKAN VARIABEL KE DALAM CLAIMS
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(expirationTime),
+        },
+    }
 
-	secret := config.JWTSecret
-	if secret == "" {
-		secret = "rahasia_super_aman_cakra_123"
-	}
-	jwtKey := []byte(secret)
+    secret := config.JWTSecret
+    if secret == "" {
+        secret = "rahasia_super_aman_cakra_123"
+    }
+    jwtKey := []byte(secret)
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtKey)
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString(jwtKey)
 }
 
 func ValidateJWT(tokenString string) (*Claims, error) {

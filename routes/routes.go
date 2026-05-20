@@ -27,6 +27,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	// Controller Baru untuk Upload
 	uploadCtrl := controllers.NewUploadController(db)
 	achievementsCtrl := controllers.NewAchievementController(db)
+	dashboardController := controllers.NewDashboardController(db)
 
 	// ---------------------------------------------------------
 	// PUBLIC ROUTES
@@ -129,6 +130,13 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 		// ---------------------------------------------------------
 		// EMPLOYEE ROUTES (Semua Role bisa akses riwayat sendiri)
 		// ---------------------------------------------------------
+
+		executiveRoutes := protected.Group("/executive")
+        // Catatan: Kita tidak memakai RoleCheckMiddleware di sini karena
+        // validasi is_executive sudah kita tanamkan langsung di dalam controllernya.
+        {
+            executiveRoutes.GET("/company-performance", dashboardController.GetCompanyPerformance)
+        }
 		employeeRoutes := protected.Group("/employee")
         employeeRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleEmployee, db_var.RoleManager, db_var.RoleAdmin))
         {
