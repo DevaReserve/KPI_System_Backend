@@ -44,7 +44,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	// ---------------------------------------------------------
 	protected := router.Group("/api")
 	protected.Use(middleware.CORSMiddleware())
-	protected.Use(middleware.AuthMiddleware())
+	protected.Use(middleware.AuthMiddleware(db))
 	{
 		// Common Routes (Bisa diakses semua user login)
 		protected.GET("/auth/profile", authController.GetProfile)

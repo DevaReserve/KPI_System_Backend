@@ -4,15 +4,17 @@ import (
     "KPI_System_Backend/global_var"
     "KPI_System_Backend/helper"
     "KPI_System_Backend/logger"
+	"KPI_System_Backend/models"
     "net/http"
     "strings"
 
     "github.com/gin-gonic/gin"
     "go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // AuthMiddleware: Memvalidasi Token
-func AuthMiddleware() gin.HandlerFunc {
+func AuthMiddleware(db *gorm.DB) gin.HandlerFunc {
     return func(c *gin.Context) {
         authHeader := c.GetHeader("Authorization")
         if authHeader == "" {
@@ -41,6 +43,28 @@ func AuthMiddleware() gin.HandlerFunc {
             return
         }
 
+		var user models.User
+        // Cek kolom is_active milik user ini langsung ke database
+        if err := db.Select("is_active").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+            c.JSON(http.StatusUnauthorized, global_var.ResponseFormat{
+                Status:  http.StatusUnauthorized,
+                Message: "User tidak ditemukan di sistem",
+                Data:    nil,
+            })
+            c.Abort()
+            return
+        }
+
+        // Jika status is_active bernilai false (artinya sudah di-DO/Non-Aktifkan oleh Admin)
+        if !user.IsActive {
+            c.JSON(http.StatusForbidden, global_var.ResponseFormat{
+                Status:  http.StatusForbidden,
+                Message: "Akses Ditolak: Akun Anda telah dinonaktifkan (DO).",
+                Data:    nil,
+            })
+            c.Abort() // Stop request di sini, jangan biarkan lanjut ke controller
+            return
+        }
         // PENTING: Set context keys yang konsisten
         c.Set("userID", claims.UserID)
         c.Set("username", claims.Username)
