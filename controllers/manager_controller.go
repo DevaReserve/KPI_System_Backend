@@ -4,6 +4,7 @@ import (
 	"KPI_System_Backend/db_var"
     "KPI_System_Backend/helper" 
 	"KPI_System_Backend/models"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -266,12 +267,16 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 	}
 	
 	managerUserID, _ := c.Get("userID")
-	var managerUser models.User
-	mc.DB.First(&managerUser, managerUserID)
-	if evaluation.EvaluatorID != managerUser.EmployeeID {
-		Response(c, http.StatusForbidden, "Anda tidak memiliki akses ke evaluasi ini", nil)
-		return
-	}
+    var managerUser models.User
+    mc.DB.First(&managerUser, managerUserID)
+    
+    // <--- TAMBAHKAN 1 BARIS INI --->
+    evaluatorEmployeeID := managerUser.EmployeeID 
+    
+    if evaluation.EvaluatorID != managerUser.EmployeeID {
+        Response(c, http.StatusForbidden, "Anda tidak memiliki akses ke evaluasi ini", nil)
+        return
+    }
 	
 	if evaluation.Status == db_var.EvaluationStatusSubmitted {
 		Response(c, http.StatusBadRequest, "Evaluasi ini sudah disubmit sebelumnya", nil)
@@ -321,16 +326,26 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 	evaluation.SubmittedAt = &now
 	
 	if err := tx.Save(&evaluation).Error; err != nil {
-		tx.Rollback()
-		Response(c, http.StatusInternalServerError, "Gagal menyimpan evaluasi akhir", nil)
+        tx.Rollback()
+        Response(c, http.StatusInternalServerError, "Gagal menyimpan evaluasi akhir", nil)
+        return
+    }
+
+	// =================================================================
+	// ---> JALANKAN LOGIKA DETEKSI SP OTOMATIS BERJENJANG DI SINI <---
+	// =================================================================
+	err := CheckAndGenerateAutomaticSP(tx, evaluation.EmployeeID, evaluation.TotalScore, evaluatorEmployeeID)
+	if err != nil {
+		tx.Rollback() // Batalkan submit nilai jika pembuatan SP mengalami kegagalan sistem
+		Response(c, http.StatusInternalServerError, "Gagal memproses pembuatan SP otomatis", nil)
 		return
 	}
+	// =================================================================
 
-	if err := tx.Commit().Error; err != nil {
-		Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
-		return
-	}
-
+    if err := tx.Commit().Error; err != nil {
+        Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
+        return
+    }
     // --- [AUDIT TRAIL] ---
     // INI SANGAT PENTING: Mencatat bahwa manajer telah menyelesaikan penilaian
     if idUint, ok := managerUserID.(uint); ok {
@@ -338,4 +353,58 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
     }
 
 	Response(c, http.StatusOK, "Evaluasi berhasil disubmit", evaluation)
+}
+// CheckAndGenerateAutomaticSP bertugas memeriksa riwayat nilai dan menerbitkan SP 1, 2, atau 3
+func CheckAndGenerateAutomaticSP(tx *gorm.DB, employeeID uint, currentScore float64, evaluatorEmployeeID uint) error {
+	// 1. Batasan Kinerja Buruk: Jika skor >= 2.50 (Grade A, B, C), maka pegawai AMAN.
+	if currentScore >= 2.50 {
+		return nil
+	}
+
+	// 2. Hitung berapa kali pegawai ini mendapat nilai buruk secara berturut-turut
+	// Kita akan mengambil riwayat evaluasi terakhir yang sudah berstatus 'submitted' sebelum evaluasi saat ini
+	var previousEvaluations []models.Evaluation
+	err := tx.Where("employee_id = ? AND status = ?", employeeID, "submitted").
+		Order("submitted_at DESC").
+		Limit(2). // Kita hanya perlu menengok maksimal 2 periode ke belakang
+		Find(&previousEvaluations).Error
+
+	if err != nil {
+		return err
+	}
+
+	// 3. Tentukan Tingkat SP berdasarkan konsistensi nilai buruknya
+	spLevel := "SP1" // Defaultnya jika ini pelanggaran pertama kali
+	reasonMessage := fmt.Sprintf("Surat Peringatan 1 diterbitkan otomatis oleh sistem karena total skor evaluasi Anda pada periode ini berada di bawah standar (Skor: %.2f).", currentScore)
+
+	// Cek kondisi berturut-turut
+	if len(previousEvaluations) >= 1 && previousEvaluations[0].TotalScore < 2.50 {
+		// Jika periode lalu JUGA buruk, naik pangkat jadi SP2
+		spLevel = "SP2"
+		reasonMessage = fmt.Sprintf("Surat Peringatan 2 diterbitkan otomatis oleh sistem karena Anda mendapatkan skor di bawah standar selama dua periode berturut-turut (Skor Periode Ini: %.2f).", currentScore)
+
+		if len(previousEvaluations) == 2 && previousEvaluations[1].TotalScore < 2.50 {
+			// Jika 2 periode lalu JUGA buruk (Total 3 periode hancur berturut-turut), naik jadi SP3
+			spLevel = "SP3"
+			reasonMessage = fmt.Sprintf("Surat Peringatan TERAKHIR (SP3) diterbitkan otomatis oleh sistem karena Anda mendapatkan skor di bawah standar selama tiga periode berturut-turut (Skor Periode Ini: %.2f). Silakan hubungi HRD untuk evaluasi kelanjutan kontrak.", currentScore)
+		}
+	}
+
+	// 4. Masukkan data SP baru ke dalam tabel warnings sesuai struct models.Warning Anda
+	newWarning := models.Warning{
+		EmployeeID:  employeeID,
+		IssuedByID:  evaluatorEmployeeID, // ID Manajer yang mensubmit nilai
+		Level:       spLevel,
+		Reason:      reasonMessage,
+		Description: "Diterbitkan otomatis oleh Sistem KPI Penilaian Kinerja.",
+		IssuedAt:    time.Now(),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := tx.Create(&newWarning).Error; err != nil {
+		return err
+	}
+
+	return nil
 }
