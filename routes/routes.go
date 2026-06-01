@@ -24,7 +24,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	myPerformanceController := controllers.NewMyPerformanceController(db)
 	activityCtrl := controllers.NewActivityController(db)
 	warningCtrl := controllers.NewWarningController(db)
-	
+
 	// Controller Baru untuk Upload
 	uploadCtrl := controllers.NewUploadController(db)
 	achievementsCtrl := controllers.NewAchievementController(db)
@@ -34,7 +34,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	// PUBLIC ROUTES
 	// ---------------------------------------------------------
 	public := router.Group("/api")
-	public.Use(middleware.CORSMiddleware()) 
+	public.Use(middleware.CORSMiddleware())
 	{
 		public.POST("/auth/login", authController.Login)
 		public.GET("/ping", pingController.Ping)
@@ -103,9 +103,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			adminRoutes.GET("/activity-logs", activityCtrl.GetAllLogs)
 
 			// Warnings
-			adminRoutes.POST("/warnings", warningCtrl.CreateWarning)          			// Terbitkan SP
-            adminRoutes.DELETE("/warnings/:id", warningCtrl.DeleteWarning)    			// Hapus SP
-            adminRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings) // Lihat SP Pegawai
+			adminRoutes.POST("/warnings", warningCtrl.CreateWarning)                    // Terbitkan SP
+			adminRoutes.DELETE("/warnings/:id", warningCtrl.DeleteWarning)              // Hapus SP
+			adminRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings) // Lihat SP Pegawai
 		}
 
 		// ---------------------------------------------------------
@@ -129,7 +129,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			
 			// Warnings
 			managerRoutes.POST("/warnings", warningCtrl.CreateWarning)
-            managerRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings)
+			managerRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings)
 		}
 
 		// ---------------------------------------------------------
@@ -137,25 +137,26 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 		// ---------------------------------------------------------
 
 		executiveRoutes := protected.Group("/executive")
-        // Catatan: Kita tidak memakai RoleCheckMiddleware di sini karena
-        // validasi is_executive sudah kita tanamkan langsung di dalam controllernya.
-        {
-            executiveRoutes.GET("/company-performance", dashboardController.GetCompanyPerformance)
-        }
+		// Catatan: Kita tidak memakai RoleCheckMiddleware di sini karena
+		// validasi is_executive sudah kita tanamkan langsung di dalam controllernya.
+		{
+			executiveRoutes.GET("/company-performance", dashboardController.GetCompanyPerformance)
+			executiveRoutes.GET("/periods", periodController.GetAllPeriods)
+		}
 		employeeRoutes := protected.Group("/employee")
-        employeeRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleEmployee, db_var.RoleManager, db_var.RoleAdmin))
-        {
-            employeeRoutes.GET("/history", myPerformanceController.GetMyPerformanceHistory)
-            employeeRoutes.GET("/latest", myPerformanceController.GetMyLatestPerformance)
-            employeeRoutes.GET("/evaluations/:id", myPerformanceController.GetMyEvaluationDetail)
-            
-            // Upload Foto Profil
-            employeeRoutes.POST("/upload-avatar", uploadCtrl.UploadProfilePicture)
+		employeeRoutes.Use(middleware.RoleCheckMiddleware(db_var.RoleEmployee, db_var.RoleManager, db_var.RoleAdmin))
+		{
+			employeeRoutes.GET("/history", myPerformanceController.GetMyPerformanceHistory)
+			employeeRoutes.GET("/latest", myPerformanceController.GetMyLatestPerformance)
+			employeeRoutes.GET("/evaluations/:id", myPerformanceController.GetMyEvaluationDetail)
 
-            // --- 2. TAMBAHKAN ROUTE PRESTASI DISINI ---
-            employeeRoutes.GET("/achievements", achievementsCtrl.GetMyAchievements)
-            employeeRoutes.POST("/achievements", achievementsCtrl.CreateAchievement)
-            employeeRoutes.DELETE("/achievements/:id", achievementsCtrl.DeleteAchievement)
+			// Upload Foto Profil
+			employeeRoutes.POST("/upload-avatar", uploadCtrl.UploadProfilePicture)
+
+			// --- 2. TAMBAHKAN ROUTE PRESTASI DISINI ---
+			employeeRoutes.GET("/achievements", achievementsCtrl.GetMyAchievements)
+			employeeRoutes.POST("/achievements", achievementsCtrl.CreateAchievement)
+			employeeRoutes.DELETE("/achievements/:id", achievementsCtrl.DeleteAchievement)
 			employeeRoutes.PUT("/achievements/:id", achievementsCtrl.UpdateAchievement)
 
 			// Warnings

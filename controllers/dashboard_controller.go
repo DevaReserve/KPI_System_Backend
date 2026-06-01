@@ -1,11 +1,12 @@
 package controllers
 
 import (
-	"net/http"
 	"KPI_System_Backend/logger"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type DashboardController struct {
@@ -20,7 +21,7 @@ func NewDashboardController(db *gorm.DB) *DashboardController {
 func (dc *DashboardController) GetCompanyPerformance(c *gin.Context) {
 	// 1. VALIDASI HAK AKSES EKSEKUTIF (Mengambil data dari Middleware)
 	isExecutiveInterface, exists := c.Get("is_executive")
-	
+
 	// Jika tidak ada data eksekutif, atau nilainya false, TOLAK AKSESNYA
 	if !exists || isExecutiveInterface.(bool) == false {
 		logger.Warn("Akses ilegal ke Executive Dashboard ditolak", zap.Any("userID", c.MustGet("userID")))
@@ -40,13 +41,26 @@ func (dc *DashboardController) GetCompanyPerformance(c *gin.Context) {
 	/* Contoh Query GORM tingkat lanjut (asumsi tabel divisions, employees, dan evaluations sudah direlasikan).
 	   Query ini akan menghitung rata-rata Total Skor dari seluruh evaluasi yang ada di setiap divisi.
 	*/
-	err := dc.DB.Raw(`
-		SELECT d.name as division_name, COALESCE(AVG(e.total_score), 0) as average_score 
-		FROM divisions d 
-		LEFT JOIN employees emp ON emp.division_id = d.id 
-		LEFT JOIN evaluations e ON e.employee_id = emp.id AND e.status = 'Submitted'
-		GROUP BY d.id
-	`).Scan(&performanceData).Error
+	periodID := c.Query("period_id")
+
+	baseQuery := `
+		SELECT d.name as division_name, COALESCE(AVG(e.total_score), 0) as average_score
+		FROM divisions d
+		LEFT JOIN employees emp ON emp.division_id = d.id
+		LEFT JOIN evaluations e ON e.employee_id = emp.id AND e.status = 'submitted'`
+
+	if periodID != "" {
+		baseQuery += " AND e.period_id = ?"
+	}
+
+	baseQuery += "\n\t\tGROUP BY d.id"
+
+	var err error
+	if periodID != "" {
+		err = dc.DB.Raw(baseQuery, periodID).Scan(&performanceData).Error
+	} else {
+		err = dc.DB.Raw(baseQuery).Scan(&performanceData).Error
+	}
 
 	if err != nil {
 		logger.Error("Gagal mengambil data performa perusahaan", zap.Error(err))
