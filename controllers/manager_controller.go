@@ -342,17 +342,71 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 	}
 	// =================================================================
 
-    if err := tx.Commit().Error; err != nil {
+if err := tx.Commit().Error; err != nil {
         Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
         return
     }
+
+    // =================================================================
+    // ---> KIRIM EMAIL NOTIFIKASI KE PEGAWAI SECARA ASINKRON <---
+    // =================================================================
+    // Kita menggunakan perintah 'go func()' agar proses email berjalan
+    // di latar belakang (background). Dengan begini, loading aplikasi
+    // tidak akan tertahan (nge-lag) saat menunggu respon server Gmail.
+go func() {
+        // Pastikan pegawai memiliki email di database
+        if targetEmployee.Email != "" {
+            // 1. Cari nama manajer (evaluator) di database
+            var evaluator models.Employee
+            mc.DB.First(&evaluator, evaluatorEmployeeID)
+            evaluatorName := evaluator.Name
+
+            // 2. Cari nama periode evaluasi
+            var period models.EvaluationPeriod
+            mc.DB.First(&period, evaluation.PeriodID)
+            periodName := period.Name
+
+            // 3. Setup Link Aplikasi (Ganti localhost dengan IP WiFi Anda jika ingin diuji di HP)
+            appLink := "http://localhost:5173"
+
+            subject := fmt.Sprintf("Pemberitahuan: Evaluasi Kinerja %s Telah Selesai", periodName)
+            htmlBody := fmt.Sprintf(`
+                <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                    <div style="background-color: #1e40af; padding: 20px; text-align: center;">
+                        <h2 style="color: #ffffff; margin: 0; font-size: 20px;">PT. Cakra Media Data</h2>
+                    </div>
+                    <div style="padding: 30px;">
+                        <p style="font-size: 16px;">Halo, <strong>%s</strong>,</p>
+                        <p style="font-size: 15px; line-height: 1.6; color: #475569;">
+                            Proses penilaian kinerja (KPI) Anda untuk <strong>%s</strong> telah selesai dievaluasi oleh <strong>%s</strong>.
+                        </p>
+                        <div style="background-color: #f8fafc; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0;">
+                            <p style="margin: 0; font-size: 14px; color: #334155;">
+                                Data rapor kinerja, nilai akhir, serta catatan <i>feedback</i> dari manajer Anda sudah dapat diakses melalui portal sistem internal perusahaan.
+                            </p>
+                        </div>
+                        <div style="text-align: center; margin-top: 30px;">
+                            <a href="%s" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">Lihat Rapor Kinerja</a>
+                        </div>
+                    </div>
+                    <div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-top: 1px solid #e2e8f0;">
+                        <p style="font-size: 12px; color: #64748b; margin: 0;">Pesan ini dihasilkan otomatis oleh Sistem KPI. Harap tidak membalas email ini.</p>
+                    </div>
+                </div>
+            `, targetEmployee.Name, periodName, evaluatorName, appLink)
+
+            // Panggil fungsi pembantu kita
+            helper.SendEmailNotification(targetEmployee.Email, subject, htmlBody)
+        }
+    }()
+    // =================================================================
+
     // --- [AUDIT TRAIL] ---
-    // INI SANGAT PENTING: Mencatat bahwa manajer telah menyelesaikan penilaian
     if idUint, ok := managerUserID.(uint); ok {
-	    helper.LogActivity(mc.DB, idUint, "SUBMIT_EVALUATION", "Menilai pegawai: "+targetEmployee.Name, c.ClientIP())
+        helper.LogActivity(mc.DB, idUint, "SUBMIT_EVALUATION", "Menilai pegawai: "+targetEmployee.Name, c.ClientIP())
     }
 
-	Response(c, http.StatusOK, "Evaluasi berhasil disubmit", evaluation)
+    Response(c, http.StatusOK, "Evaluasi berhasil disubmit", evaluation)
 }
 // CheckAndGenerateAutomaticSP bertugas memeriksa riwayat nilai dan menerbitkan SP 1, 2, atau 3
 func CheckAndGenerateAutomaticSP(tx *gorm.DB, employeeID uint, currentScore float64, evaluatorEmployeeID uint) error {
@@ -407,4 +461,51 @@ func CheckAndGenerateAutomaticSP(tx *gorm.DB, employeeID uint, currentScore floa
 	}
 
 	return nil
+}
+
+// ResolveAppeal: Manajer menolak komplain dan mengembalikan status menjadi final (submitted)
+// @Route: PUT /api/manager/evaluations/:id/resolve-appeal
+func (mc *ManagerController) ResolveAppeal(c *gin.Context) {
+	id := c.Param("id")
+
+	var req struct {
+		Status string `json:"status" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Response(c, http.StatusBadRequest, "Format request tidak valid", err.Error())
+		return
+	}
+
+	var evaluation models.Evaluation
+	if err := mc.DB.First(&evaluation, id).Error; err != nil {
+		Response(c, http.StatusNotFound, "Evaluasi tidak ditemukan", nil)
+		return
+	}
+
+	// Cek apakah ini benar-benar evaluasi milik manajer yang sedang login
+	managerUserID, _ := c.Get("userID")
+	var managerUser models.User
+	mc.DB.First(&managerUser, managerUserID)
+	if evaluation.EvaluatorID != managerUser.EmployeeID {
+		Response(c, http.StatusForbidden, "Anda tidak memiliki akses untuk meresolusi evaluasi ini", nil)
+		return
+	}
+
+	// Jika ditolak (rejected), kita ubah statusnya kembali menjadi "submitted" 
+    // agar form kembali terkunci (Read Only), tapi history komplain tetap ada di database.
+	if req.Status == "rejected" {
+		evaluation.Status = db_var.EvaluationStatusSubmitted 
+	}
+
+	if err := mc.DB.Save(&evaluation).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal memperbarui status sanggahan", nil)
+		return
+	}
+
+	// --- LOG ACTIVITY ---
+	if idUint, ok := managerUserID.(uint); ok {
+		helper.LogActivity(mc.DB, idUint, "RESOLVE_APPEAL", "Menolak sanggahan untuk evaluasi ID: "+id, c.ClientIP())
+	}
+
+	Response(c, http.StatusOK, "Sanggahan berhasil diresolusi", nil)
 }

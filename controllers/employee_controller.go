@@ -312,3 +312,62 @@ func (ec *EmployeeController) ResetPassword(c *gin.Context) {
 
 	Response(c, http.StatusOK, "Password berhasil direset menjadi 'cakra123'", nil)
 }
+// SubmitAppeal: Pegawai mengajukan komplain beserta bukti
+// @Route: POST /api/employee/evaluations/:id/appeal
+func (ec *EmployeeController) SubmitAppeal(c *gin.Context) {
+    id := c.Param("id")
+
+    // 1. Cari Evaluasi tersebut
+    var evaluation models.Evaluation
+    if err := ec.DB.First(&evaluation, id).Error; err != nil {
+        Response(c, http.StatusNotFound, "Evaluasi tidak ditemukan", nil)
+        return
+    }
+
+    // 2. Cek apakah statusnya memang bisa disanggah
+    if evaluation.Status != db_var.EvaluationStatusSubmitted {
+        Response(c, http.StatusBadRequest, "Evaluasi ini tidak dalam status yang bisa disanggah", nil)
+        return
+    }
+
+    // 3. Tangkap teks alasan dari form
+    reason := c.PostForm("appeal_reason")
+    if reason == "" {
+        Response(c, http.StatusBadRequest, "Alasan sanggahan tidak boleh kosong", nil)
+        return
+    }
+
+    // 4. Tangkap File Bukti (Evidence)
+    file, err := c.FormFile("evidence_file")
+    var evidenceURL string
+    if err == nil {
+        // Jika ada file, simpan ke folder uploads
+        filename := time.Now().Format("20060102150405") + "_" + file.Filename
+        filepath := "uploads/evidence/" + filename
+        
+        // Simpan file ke server
+        if err := c.SaveUploadedFile(file, filepath); err != nil {
+            Response(c, http.StatusInternalServerError, "Gagal menyimpan file bukti", nil)
+            return
+        }
+        evidenceURL = "/" + filepath
+    }
+
+    // 5. Update Database (Ubah status dan simpan data komplain)
+    evaluation.Status = "appealed" // Mengubah status menjadi "Dalam Peninjauan"
+    evaluation.AppealReason = reason
+    evaluation.EvidenceURL = evidenceURL
+
+    if err := ec.DB.Save(&evaluation).Error; err != nil {
+        Response(c, http.StatusInternalServerError, "Gagal memproses sanggahan", nil)
+        return
+    }
+
+    // --- LOG ACTIVITY ---
+    userID, _ := c.Get("userID")
+    if idUint, ok := userID.(uint); ok {
+        helper.LogActivity(ec.DB, idUint, "SUBMIT_APPEAL", "Mengajukan sanggahan untuk evaluasi ID: "+id, c.ClientIP())
+    }
+
+    Response(c, http.StatusOK, "Sanggahan berhasil diajukan dan sedang menunggu tinjauan manajer", nil)
+}

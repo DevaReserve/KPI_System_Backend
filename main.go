@@ -35,15 +35,11 @@ func main() {
     if _, err := os.Stat("./uploads/documents"); os.IsNotExist(err) {
         os.MkdirAll("./uploads/documents", os.ModePerm)
     }
-
-    // 4. Setup Gin
+    
+// 4. Setup Gin
     router := gin.Default()
     router.Use(middleware.CORSMiddleware())
 
-    // --- TAMBAHAN PENTING: Static File Serving ---
-    // Ini membuat file di folder "./uploads" bisa diakses browser lewat URL http://host/uploads/...
-    router.Static("/uploads", "./uploads") 
-    
     // 5. Setup routes
     routes.SetupRoutes(router, db)
     

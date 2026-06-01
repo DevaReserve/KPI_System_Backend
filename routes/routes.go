@@ -11,6 +11,7 @@ import (
 
 func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	// Init Controllers
+	router.Static("/uploads", "./uploads")
 	authController := controllers.NewAuthController(db)
 	pingController := controllers.NewPingController()
 	divisionController := controllers.NewDivisionController(db)
@@ -119,9 +120,13 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			managerRoutes.GET("/evaluations/:id", managerController.GetEvaluationDetail)
 			managerRoutes.PUT("/evaluations/:id/submit", managerController.SubmitEvaluation)
 
+			managerRoutes.PUT("/evaluations/:id/resolve-appeal", managerController.ResolveAppeal)
+
+
 			// Achievement
 			managerRoutes.GET("/employees/:id/achievements", achievementsCtrl.GetEmployeeAchievements)
 
+			
 			// Warnings
 			managerRoutes.POST("/warnings", warningCtrl.CreateWarning)
             managerRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings)
@@ -155,6 +160,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 
 			// Warnings
 			employeeRoutes.GET("/warnings", warningCtrl.GetMyWarnings)
+			employeeRoutes.POST("/evaluations/:id/appeal", employeeController.SubmitAppeal)
+			
         }
 	}
 }
