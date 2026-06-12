@@ -46,6 +46,7 @@ func InitDB() (*gorm.DB, error) {
 		&models.EmployeeAchievement{},
 		&models.ActivityLog{},
 		&models.Warning{},
+		&models.KPITarget{}, // [BARU] Tabel target KPI
 	)
 	
 	if err != nil {

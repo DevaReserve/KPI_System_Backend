@@ -29,6 +29,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	uploadCtrl := controllers.NewUploadController(db)
 	achievementsCtrl := controllers.NewAchievementController(db)
 	dashboardController := controllers.NewDashboardController(db)
+	adminStatsCtrl := controllers.NewAdminStatsController(db)
+	kpiTargetCtrl := controllers.NewKPITargetController(db)
 
 	// ---------------------------------------------------------
 	// PUBLIC ROUTES
@@ -50,6 +52,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 		// Common Routes (Bisa diakses semua user login)
 		protected.GET("/auth/profile", authController.GetProfile)
 		protected.PUT("/auth/change-password", authController.ChangePassword)
+		protected.GET("/periods", periodController.GetAllPeriods)
 
 		// ---------------------------------------------------------
 		// ADMIN ROUTES (Hanya Admin)
@@ -106,6 +109,14 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			adminRoutes.POST("/warnings", warningCtrl.CreateWarning)                    // Terbitkan SP
 			adminRoutes.DELETE("/warnings/:id", warningCtrl.DeleteWarning)              // Hapus SP
 			adminRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings) // Lihat SP Pegawai
+			adminRoutes.GET("/warnings", adminStatsCtrl.GetAllWarnings)                 // [BARU] Semua SP
+
+			// Admin Stats & Dashboard
+			adminRoutes.GET("/dashboard", adminStatsCtrl.GetAdminDashboard)             // [BARU] Dashboard Stats
+			adminRoutes.GET("/divisions/stats", adminStatsCtrl.GetDivisionStats)        // [BARU] Statistik Divisi
+
+			// Reports + Comparison
+			adminRoutes.GET("/reports/comparison", reportController.GetPeriodComparison) // [BARU] Komparasi 2 Periode
 		}
 
 		// ---------------------------------------------------------
@@ -121,6 +132,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			managerRoutes.PUT("/evaluations/:id/submit", managerController.SubmitEvaluation)
 
 			managerRoutes.PUT("/evaluations/:id/resolve-appeal", managerController.ResolveAppeal)
+
+			// KPI Targets (Goal Setting)
+			managerRoutes.GET("/targets", kpiTargetCtrl.GetTargets)                           // Lihat target pegawai
+			managerRoutes.POST("/targets/bulk", kpiTargetCtrl.SetTargetsBulk)               // Set target massal
+			managerRoutes.GET("/targets/indicators", kpiTargetCtrl.GetIndicatorsForTarget)   // Ambil indikator
 
 
 			// Achievement
@@ -162,6 +178,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			// Warnings
 			employeeRoutes.GET("/warnings", warningCtrl.GetMyWarnings)
 			employeeRoutes.POST("/evaluations/:id/appeal", employeeController.SubmitAppeal)
+
+			// Employee: lihat target KPI sendiri
+			employeeRoutes.GET("/targets", kpiTargetCtrl.GetMyTargets)
 			
         }
 	}
