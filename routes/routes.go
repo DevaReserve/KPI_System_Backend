@@ -31,6 +31,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	dashboardController := controllers.NewDashboardController(db)
 	adminStatsCtrl := controllers.NewAdminStatsController(db)
 	kpiTargetCtrl := controllers.NewKPITargetController(db)
+	notificationCtrl := controllers.NewNotificationController(db)
 
 	// ---------------------------------------------------------
 	// PUBLIC ROUTES
@@ -53,6 +54,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 		protected.GET("/auth/profile", authController.GetProfile)
 		protected.PUT("/auth/change-password", authController.ChangePassword)
 		protected.GET("/periods", periodController.GetAllPeriods)
+
+		// Notifications
+		protected.GET("/notifications", notificationCtrl.GetMyNotifications)
+		protected.PUT("/notifications/:id/read", notificationCtrl.MarkAsRead)
+		protected.PUT("/notifications/read-all", notificationCtrl.MarkAllAsRead)
 
 		// ---------------------------------------------------------
 		// ADMIN ROUTES (Hanya Admin)

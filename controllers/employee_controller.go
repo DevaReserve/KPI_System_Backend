@@ -369,5 +369,19 @@ func (ec *EmployeeController) SubmitAppeal(c *gin.Context) {
         helper.LogActivity(ec.DB, idUint, "SUBMIT_APPEAL", "Mengajukan sanggahan untuk evaluasi ID: "+id, c.ClientIP())
     }
 
+    // --- BUAT NOTIFIKASI IN-APP KE MANAGER ---
+    var managerUser models.User
+    ec.DB.Where("employee_id = ?", evaluation.EvaluatorID).First(&managerUser)
+
+    if managerUser.ID != 0 {
+        notif := models.Notification{
+            UserID:  managerUser.ID,
+            Title:   "Sanggahan Baru",
+            Message: "Ada pegawai yang mengajukan sanggahan terhadap evaluasinya. Silakan periksa.",
+            Type:    "appeal",
+        }
+        ec.DB.Create(&notif)
+    }
+
     Response(c, http.StatusOK, "Sanggahan berhasil diajukan dan sedang menunggu tinjauan manajer", nil)
 }

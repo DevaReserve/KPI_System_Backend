@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"KPI_System_Backend/config"
 	"KPI_System_Backend/db_var"
     "KPI_System_Backend/helper" 
 	"KPI_System_Backend/models"
@@ -348,6 +349,23 @@ if err := tx.Commit().Error; err != nil {
     }
 
     // =================================================================
+    // ---> BUAT NOTIFIKASI IN-APP KE PEGAWAI <---
+    // =================================================================
+    var targetUser models.User
+    mc.DB.Where("employee_id = ?", targetEmployee.ID).First(&targetUser)
+    if targetUser.ID != 0 {
+        var period models.EvaluationPeriod
+        mc.DB.First(&period, evaluation.PeriodID)
+        notif := models.Notification{
+            UserID: targetUser.ID,
+            Title:  "Evaluasi Selesai",
+            Message: fmt.Sprintf("Evaluasi kinerja Anda untuk %s telah selesai dinilai.", period.Name),
+            Type:   "evaluation",
+        }
+        mc.DB.Create(&notif)
+    }
+
+    // =================================================================
     // ---> KIRIM EMAIL NOTIFIKASI KE PEGAWAI SECARA ASINKRON <---
     // =================================================================
     // Kita menggunakan perintah 'go func()' agar proses email berjalan
@@ -367,7 +385,7 @@ go func() {
             periodName := period.Name
 
             // 3. Setup Link Aplikasi (Ganti localhost dengan IP WiFi Anda jika ingin diuji di HP)
-            appLink := "http://localhost:5173"
+            appLink := config.FrontEndURL
 
             subject := fmt.Sprintf("Pemberitahuan: Evaluasi Kinerja %s Telah Selesai", periodName)
             htmlBody := fmt.Sprintf(`
@@ -495,7 +513,9 @@ func (mc *ManagerController) ResolveAppeal(c *gin.Context) {
     // agar form kembali terkunci (Read Only), tapi history komplain tetap ada di database.
 	if req.Status == "rejected" {
 		evaluation.Status = db_var.EvaluationStatusSubmitted 
-	}
+	} else if req.Status == "approved" {
+        evaluation.Status = db_var.EvaluationStatusDraft
+    }
 
 	if err := mc.DB.Save(&evaluation).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal memperbarui status sanggahan", nil)
@@ -504,8 +524,30 @@ func (mc *ManagerController) ResolveAppeal(c *gin.Context) {
 
 	// --- LOG ACTIVITY ---
 	if idUint, ok := managerUserID.(uint); ok {
-		helper.LogActivity(mc.DB, idUint, "RESOLVE_APPEAL", "Menolak sanggahan untuk evaluasi ID: "+id, c.ClientIP())
+        actionMsg := "Menolak sanggahan"
+        if req.Status == "approved" {
+            actionMsg = "Menerima sanggahan"
+        }
+		helper.LogActivity(mc.DB, idUint, "RESOLVE_APPEAL", actionMsg+" untuk evaluasi ID: "+id, c.ClientIP())
 	}
+
+    // --- BUAT NOTIFIKASI IN-APP KE PEGAWAI ---
+    var employeeUser models.User
+    mc.DB.Where("employee_id = ?", evaluation.EmployeeID).First(&employeeUser)
+
+    if employeeUser.ID != 0 {
+        statusMsg := "Sanggahan Anda telah ditolak. Nilai ditetapkan secara permanen."
+        if req.Status == "approved" {
+            statusMsg = "Sanggahan Anda diterima. Nilai akan direvisi oleh manajer."
+        }
+        notif := models.Notification{
+            UserID:  employeeUser.ID,
+            Title:   "Hasil Sanggahan",
+            Message: statusMsg,
+            Type:    "appeal",
+        }
+        mc.DB.Create(&notif)
+    }
 
 	Response(c, http.StatusOK, "Sanggahan berhasil diresolusi", nil)
 }

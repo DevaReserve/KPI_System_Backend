@@ -11,6 +11,7 @@ import (
 var (
 	IniConfig *ini.File
 	AppPort   string
+    FrontEndURL string
 	JWTSecret string
 	JWTExpiry int
 )
@@ -47,10 +48,14 @@ func GetIniDatabase() global_var.DatabaseConnection {
 func LoadAppPort() {
 	if IniConfig != nil {
 		AppPort = IniConfig.Section("GlobalConfig").Key("AppPort").String()
+        FrontEndURL = IniConfig.Section("GlobalConfig").Key("FrontEndURL").String()
 	}
 	if AppPort == "" {
 		AppPort = ":8080"
 	}
+    if FrontEndURL == "" {
+        FrontEndURL = "http://localhost:5173"
+    }
 }
 
 func LoadJWTConfig() {
