@@ -132,3 +132,60 @@ func (wc *WarningController) DeleteWarning(c *gin.Context) {
 
 	Response(c, http.StatusOK, "Peringatan berhasil dihapus", nil)
 }
+
+// GetTeamWarnings: Manajer melihat SP yang diberikan kepada timnya
+func (wc *WarningController) GetTeamWarnings(c *gin.Context) {
+	managerUserID, _ := c.Get("userID")
+	var managerUser models.User
+	if err := wc.DB.First(&managerUser, managerUserID).Error; err != nil {
+		Response(c, http.StatusNotFound, "Data manajer tidak ditemukan", nil)
+		return
+	}
+
+	levelFilter := c.Query("level")       // "SP1", "SP2", "SP3"
+	employeeID  := c.Query("employee_id") // ID Pegawai
+
+	type WarningDetail struct {
+		ID           uint   `json:"id"`
+		EmployeeID   uint   `json:"employee_id"`
+		EmployeeName string `json:"employee_name"`
+		DivisionName string `json:"division_name"`
+		IssuedByName string `json:"issued_by_name"`
+		Level        string `json:"level"`
+		Reason       string `json:"reason"`
+		Description  string `json:"description"`
+		IssuedAt     string `json:"issued_at"`
+	}
+
+	query := wc.DB.Table("warnings w").
+		Select(`w.id, w.employee_id, 
+			emp.name as employee_name, 
+			d.name as division_name,
+			issuer.name as issued_by_name,
+			w.level, w.reason, w.description,
+			w.issued_at`).
+		Joins("LEFT JOIN employees emp ON emp.id = w.employee_id").
+		Joins("LEFT JOIN divisions d ON d.id = emp.division_id").
+		Joins("LEFT JOIN employees issuer ON issuer.id = w.issued_by_id").
+		Where("emp.direct_supervisor_id = ?", managerUser.EmployeeID).
+		Order("w.issued_at DESC")
+
+	if levelFilter != "" {
+		query = query.Where("w.level = ?", levelFilter)
+	}
+	if employeeID != "" {
+		query = query.Where("w.employee_id = ?", employeeID)
+	}
+
+	var results []WarningDetail
+	if err := query.Scan(&results).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal mengambil data SP", nil)
+		return
+	}
+
+	if results == nil {
+		results = []WarningDetail{}
+	}
+
+	Response(c, http.StatusOK, "Data SP tim berhasil diambil", results)
+}

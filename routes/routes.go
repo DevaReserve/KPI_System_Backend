@@ -140,9 +140,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			managerRoutes.PUT("/evaluations/:id/resolve-appeal", managerController.ResolveAppeal)
 
 			// KPI Targets (Goal Setting)
-			managerRoutes.GET("/targets", kpiTargetCtrl.GetTargets)                           // Lihat target pegawai
-			managerRoutes.POST("/targets/bulk", kpiTargetCtrl.SetTargetsBulk)               // Set target massal
-			managerRoutes.GET("/targets/indicators", kpiTargetCtrl.GetIndicatorsForTarget)   // Ambil indikator
+			managerRoutes.POST("/targets/bulk", kpiTargetCtrl.SetTargetsBulk)
+			managerRoutes.POST("/targets/division", kpiTargetCtrl.SetTargetsDivision)
+			managerRoutes.GET("/targets", kpiTargetCtrl.GetTargets)
+			managerRoutes.GET("/targets/indicators", kpiTargetCtrl.GetIndicatorsForTarget)
+			managerRoutes.GET("/targets/indicators-division", kpiTargetCtrl.GetIndicatorsForDivision)   // Ambil indikator
 
 
 			// Achievement
@@ -151,6 +153,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			
 			// Warnings
 			managerRoutes.POST("/warnings", warningCtrl.CreateWarning)
+			managerRoutes.GET("/warnings", warningCtrl.GetTeamWarnings)
 			managerRoutes.GET("/employees/:id/warnings", warningCtrl.GetEmployeeWarnings)
 		}
 

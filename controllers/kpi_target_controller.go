@@ -188,3 +188,102 @@ func (kc *KPITargetController) GetIndicatorsForTarget(c *gin.Context) {
 
 	Response(c, http.StatusOK, "Indikator berhasil diambil", indicators)
 }
+
+// ============================================================
+// GET /api/manager/targets/indicators-division?division_id=X
+// Ambil semua indikator yang relevan untuk divisi
+// ============================================================
+func (kc *KPITargetController) GetIndicatorsForDivision(c *gin.Context) {
+	divisionID := c.Query("division_id")
+	if divisionID == "" {
+		Response(c, http.StatusBadRequest, "division_id wajib diisi", nil)
+		return
+	}
+
+	var indicators []models.PerformanceIndicator
+	kc.DB.Where(
+		kc.DB.Where("indicator_type = ?", "umum").
+			Or("indicator_type = ? AND division_id = ?", "spesifik", divisionID),
+	).Find(&indicators)
+
+	Response(c, http.StatusOK, "Indikator divisi berhasil diambil", indicators)
+}
+
+// ============================================================
+// POST /api/manager/targets/division
+// Manager: set target secara massal untuk semua pegawai dalam 1 divisi
+// ============================================================
+func (kc *KPITargetController) SetTargetsDivision(c *gin.Context) {
+	type TargetItem struct {
+		IndicatorID uint   `json:"indicator_id" binding:"required"`
+		TargetScore int    `json:"target_score" binding:"required,min=1,max=5"`
+		Notes       string `json:"notes"`
+	}
+
+	var req struct {
+		DivisionID uint         `json:"division_id" binding:"required"`
+		PeriodID   uint         `json:"period_id" binding:"required"`
+		Targets    []TargetItem `json:"targets" binding:"required,min=1"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Response(c, http.StatusBadRequest, "Format request tidak valid", err.Error())
+		return
+	}
+
+	managerUserID, _ := c.Get("userID")
+	var managerUser models.User
+	kc.DB.First(&managerUser, managerUserID)
+
+	// Cari semua pegawai yang dibawahi oleh manager ini DAN berada di divisi yang dipilih
+	var employees []models.Employee
+	kc.DB.Where("direct_supervisor_id = ? AND division_id = ? AND is_active = ?", managerUser.EmployeeID, req.DivisionID, true).Find(&employees)
+
+	if len(employees) == 0 {
+		Response(c, http.StatusBadRequest, "Tidak ada pegawai aktif di divisi ini yang berada di bawah wewenang Anda", nil)
+		return
+	}
+
+	var newTargets []models.KPITarget
+	var employeeIDs []uint
+
+	for _, emp := range employees {
+		employeeIDs = append(employeeIDs, emp.ID)
+		for _, t := range req.Targets {
+			newTargets = append(newTargets, models.KPITarget{
+				EmployeeID:  emp.ID,
+				PeriodID:    req.PeriodID,
+				IndicatorID: t.IndicatorID,
+				TargetScore: t.TargetScore,
+				Notes:       t.Notes,
+				SetByID:     managerUser.EmployeeID,
+			})
+		}
+	}
+
+	tx := kc.DB.Begin()
+
+	// Hapus semua target lama
+	if err := tx.Where("employee_id IN ? AND period_id = ?", employeeIDs, req.PeriodID).Delete(&models.KPITarget{}).Error; err != nil {
+		tx.Rollback()
+		Response(c, http.StatusInternalServerError, "Gagal membersihkan data target lama", nil)
+		return
+	}
+
+	// Insert bulk
+	if err := tx.Create(&newTargets).Error; err != nil {
+		tx.Rollback()
+		Response(c, http.StatusInternalServerError, "Gagal menyimpan target massal", nil)
+		return
+	}
+
+	tx.Commit()
+
+	if idUint, ok := managerUserID.(uint); ok {
+		var div models.Division
+		kc.DB.First(&div, req.DivisionID)
+		helper.LogActivity(kc.DB, idUint, "SET_KPI_TARGET_BULK", "Menetapkan target massal divisi: "+div.Name, c.ClientIP())
+	}
+
+	Response(c, http.StatusCreated, "Target KPI massal berhasil ditetapkan", nil)
+}
