@@ -126,17 +126,18 @@ func (kc *KPITargetController) GetMyTargets(c *gin.Context) {
 	kc.DB.First(&user, userID)
 
 	type TargetWithActual struct {
-		IndicatorID   uint    `json:"indicator_id"`
-		IndicatorName string  `json:"indicator_name"`
-		Weight        float64 `json:"weight"`
-		TargetScore   int     `json:"target_score"`
-		ActualScore   int     `json:"actual_score"`   // 0 jika belum dievaluasi
-		ConvertedActual int   `json:"converted_actual"`
-		Notes         string  `json:"notes"`
+		IndicatorID     uint    `json:"indicator_id"`
+		IndicatorName   string  `json:"indicator_name"`
+		IndicatorType   string  `json:"indicator_type"`
+		Weight          float64 `json:"weight"`
+		TargetScore     int     `json:"target_score"`
+		ActualScore     int     `json:"actual_score"`   // 0 jika belum dievaluasi
+		ConvertedActual int     `json:"converted_actual"`
+		Notes           string  `json:"notes"`
 	}
 
 	query := kc.DB.Table("kpi_targets kt").
-		Select(`kt.indicator_id, pi.name as indicator_name, pi.weight, 
+		Select(`kt.indicator_id, pi.name as indicator_name, pi.indicator_type, pi.weight, 
 			kt.target_score, kt.notes,
 			COALESCE(es.score, 0) as actual_score,
 			COALESCE(es.converted_score, 0) as converted_actual`).
