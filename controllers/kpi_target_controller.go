@@ -82,9 +82,16 @@ func (kc *KPITargetController) SetTargetsBulk(c *gin.Context) {
 	var managerUser models.User
 	kc.DB.First(&managerUser, managerUserID)
 
+	// Gunakan transaksi atomik: jika Create gagal, Delete juga dibatalkan
+	tx := kc.DB.Begin()
+
 	// Hapus semua target lama untuk employee+period ini, lalu insert ulang (upsert manual)
-	kc.DB.Where("employee_id = ? AND period_id = ?", req.EmployeeID, req.PeriodID).
-		Delete(&models.KPITarget{})
+	if err := tx.Where("employee_id = ? AND period_id = ?", req.EmployeeID, req.PeriodID).
+		Delete(&models.KPITarget{}).Error; err != nil {
+		tx.Rollback()
+		Response(c, http.StatusInternalServerError, "Gagal menghapus target lama", nil)
+		return
+	}
 
 	var newTargets []models.KPITarget
 	for _, t := range req.Targets {
@@ -98,10 +105,13 @@ func (kc *KPITargetController) SetTargetsBulk(c *gin.Context) {
 		})
 	}
 
-	if err := kc.DB.Create(&newTargets).Error; err != nil {
+	if err := tx.Create(&newTargets).Error; err != nil {
+		tx.Rollback()
 		Response(c, http.StatusInternalServerError, "Gagal menyimpan target KPI", nil)
 		return
 	}
+
+	tx.Commit()
 
 	// Audit log
 	if idUint, ok := managerUserID.(uint); ok {

@@ -436,9 +436,12 @@ func CheckAndGenerateAutomaticSP(tx *gorm.DB, employeeID uint, currentScore floa
 	// 2. Hitung berapa kali pegawai ini mendapat nilai buruk secara berturut-turut
 	// Kita akan mengambil riwayat evaluasi terakhir yang sudah berstatus 'submitted' sebelum evaluasi saat ini
 	var previousEvaluations []models.Evaluation
-	err := tx.Where("employee_id = ? AND status = ?", employeeID, "submitted").
+	// PERBAIKAN: Gunakan submitted_at IS NOT NULL untuk exclude evaluasi yang baru saja dibuat
+	// dalam transaksi ini (yang submitted_at-nya baru di-set tapi belum commit).
+	// Limit(2) untuk mengambil maksimal 2 periode ke belakang.
+	err := tx.Where("employee_id = ? AND status = ? AND submitted_at IS NOT NULL", employeeID, "submitted").
 		Order("submitted_at DESC").
-		Limit(2). // Kita hanya perlu menengok maksimal 2 periode ke belakang
+		Limit(2).
 		Find(&previousEvaluations).Error
 
 	if err != nil {
@@ -509,13 +512,14 @@ func (mc *ManagerController) ResolveAppeal(c *gin.Context) {
 		return
 	}
 
-	// Jika ditolak (rejected), kita ubah statusnya kembali menjadi "submitted" 
-    // agar form kembali terkunci (Read Only), tapi history komplain tetap ada di database.
+	// Jika ditolak (rejected): kembalikan status ke "submitted" agar form terkunci (Read Only).
+	// Jika diterima (approved): set ke "appealed" agar form penilaian Manajer terbuka untuk revisi,
+	// tanpa memberikan akses edit kepada Pegawai (yang hanya bisa edit saat status = "draft").
 	if req.Status == "rejected" {
-		evaluation.Status = db_var.EvaluationStatusSubmitted 
+		evaluation.Status = db_var.EvaluationStatusSubmitted
 	} else if req.Status == "approved" {
-        evaluation.Status = db_var.EvaluationStatusDraft
-    }
+		evaluation.Status = "appealed" // Status khusus untuk mode revisi oleh Manajer
+	}
 
 	if err := mc.DB.Save(&evaluation).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal memperbarui status sanggahan", nil)
