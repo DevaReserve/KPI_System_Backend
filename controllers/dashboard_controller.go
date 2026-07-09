@@ -50,7 +50,7 @@ func (dc *DashboardController) GetCompanyPerformance(c *gin.Context) {
 	if periodID != "" {
 		baseQuery += " AND e.period_id = ?"
 	}
-	baseQuery += " GROUP BY d.id ORDER BY average_score DESC"
+	baseQuery += " WHERE d.name != 'Board of Directors' GROUP BY d.id ORDER BY average_score DESC"
 
 	if periodID != "" {
 		dc.DB.Raw(baseQuery, periodID).Scan(&divisionData)

@@ -21,15 +21,23 @@ func NewAdminStatsController(db *gorm.DB) *AdminStatsController {
 // Mengembalikan statistik lengkap untuk dashboard admin
 // ============================================================
 func (ac *AdminStatsController) GetAdminDashboard(c *gin.Context) {
+	periodID := c.Query("period_id")
+
 	// 1. Total Pegawai Aktif
 	var totalActiveEmployees int64
 	ac.DB.Model(&models.Employee{}).Where("is_active = ?", true).Count(&totalActiveEmployees)
 
-	// 2. Periode aktif
+	// 2. Periode yang dipilih / periode aktif
 	var activePeriod models.EvaluationPeriod
-	ac.DB.Where("is_active = ?", true).First(&activePeriod)
+	if periodID != "" {
+		if err := ac.DB.Where("id = ?", periodID).First(&activePeriod).Error; err != nil {
+			ac.DB.Where("is_active = ?", true).First(&activePeriod)
+		}
+	} else {
+		ac.DB.Where("is_active = ?", true).First(&activePeriod)
+	}
 
-	// 3. Total evaluasi submitted pada periode aktif
+	// 3. Total evaluasi submitted pada periode yang dipilih
 	var totalEvaluationsDone int64
 	if activePeriod.ID > 0 {
 		ac.DB.Table("evaluations").Where("period_id = ? AND status = ?", activePeriod.ID, "submitted").Count(&totalEvaluationsDone)
@@ -107,7 +115,7 @@ func (ac *AdminStatsController) GetAdminDashboard(c *gin.Context) {
 
 	if activePeriod.ID > 0 {
 		ac.DB.Model(&models.Employee{}).Where("is_active = ?", true).Count(&totalEmployeesForEval)
-		
+
 		// Dapatkan daftar pegawai yang BELUM di-submit pada periode ini
 		ac.DB.Raw(`
 			SELECT e.name as employee_name, d.name as division_name, m.name as manager_name
@@ -119,7 +127,7 @@ func (ac *AdminStatsController) GetAdminDashboard(c *gin.Context) {
 			)
 		`, activePeriod.ID).Scan(&unevaluatedEmployees)
 	}
-	
+
 	notEvaluated := len(unevaluatedEmployees)
 
 	// 9. Rata-rata skor perusahaan periode aktif
@@ -132,15 +140,15 @@ func (ac *AdminStatsController) GetAdminDashboard(c *gin.Context) {
 	}
 
 	responseData := gin.H{
-		"active_period":        activePeriod,
+		"active_period":          activePeriod,
 		"total_active_employees": totalActiveEmployees,
-		"total_warnings":       totalWarnings,
-		"warning_by_level":     warningCounts,
-		"grade_distribution":   gradeDistribution,
-		"eval_status_counts":   evalStatusCounts,
-		"not_evaluated_count":  notEvaluated,
-		"unevaluated_employees": unevaluatedEmployees,
-		"company_avg_score":    avgScore,
+		"total_warnings":         totalWarnings,
+		"warning_by_level":       warningCounts,
+		"grade_distribution":     gradeDistribution,
+		"eval_status_counts":     evalStatusCounts,
+		"not_evaluated_count":    notEvaluated,
+		"unevaluated_employees":  unevaluatedEmployees,
+		"company_avg_score":      avgScore,
 		"total_evaluations_done": totalEvaluationsDone,
 	}
 
@@ -152,8 +160,8 @@ func (ac *AdminStatsController) GetAdminDashboard(c *gin.Context) {
 // Mengembalikan semua SP dari semua pegawai (bisa filter)
 // ============================================================
 func (ac *AdminStatsController) GetAllWarnings(c *gin.Context) {
-	levelFilter := c.Query("level")       // "SP1", "SP2", "SP3"
-	employeeID  := c.Query("employee_id") // ID Pegawai
+	levelFilter := c.Query("level")      // "SP1", "SP2", "SP3"
+	employeeID := c.Query("employee_id") // ID Pegawai
 
 	type WarningDetail struct {
 		ID           uint   `json:"id"`
@@ -207,13 +215,13 @@ func (ac *AdminStatsController) GetDivisionStats(c *gin.Context) {
 	periodID := c.Query("period_id")
 
 	type DivisionStat struct {
-		DivisionID      uint    `json:"division_id"`
-		DivisionName    string  `json:"division_name"`
-		TotalEmployees  int     `json:"total_employees"`
-		EvaluatedCount  int     `json:"evaluated_count"`
-		AverageScore    float64 `json:"average_score"`
-		TopScore        float64 `json:"top_score"`
-		LowestScore     float64 `json:"lowest_score"`
+		DivisionID     uint    `json:"division_id"`
+		DivisionName   string  `json:"division_name"`
+		TotalEmployees int     `json:"total_employees"`
+		EvaluatedCount int     `json:"evaluated_count"`
+		AverageScore   float64 `json:"average_score"`
+		TopScore       float64 `json:"top_score"`
+		LowestScore    float64 `json:"lowest_score"`
 	}
 
 	baseSelect := `
@@ -229,6 +237,7 @@ func (ac *AdminStatsController) GetDivisionStats(c *gin.Context) {
 	query := ac.DB.Table("divisions d").
 		Select(baseSelect).
 		Joins("LEFT JOIN employees emp ON emp.division_id = d.id AND emp.is_active = true").
+		Where("d.name != ?", "Board of Directors").
 		Group("d.id, d.name").
 		Order("average_score DESC")
 
