@@ -114,7 +114,11 @@ func (ac *AdminStatsController) GetAdminDashboard(c *gin.Context) {
 	var totalEmployeesForEval int64
 
 	if activePeriod.ID > 0 {
-		ac.DB.Model(&models.Employee{}).Where("is_active = ?", true).Count(&totalEmployeesForEval)
+		ac.DB.Table("employees").
+			Joins("LEFT JOIN divisions d ON d.id = employees.division_id").
+			Joins("LEFT JOIN users u ON u.employee_id = employees.id").
+			Where("employees.is_active = ? AND d.name != ? AND (u.role IS NULL OR u.role != ?)", true, "Board of Directors", "admin").
+			Count(&totalEmployeesForEval)
 
 		// Dapatkan daftar pegawai yang BELUM di-submit pada periode ini
 		ac.DB.Raw(`
@@ -122,7 +126,8 @@ func (ac *AdminStatsController) GetAdminDashboard(c *gin.Context) {
 			FROM employees e
 			LEFT JOIN divisions d ON e.division_id = d.id
 			LEFT JOIN employees m ON m.id = d.manager_id
-			WHERE e.is_active = true AND e.id NOT IN (
+			LEFT JOIN users u ON u.employee_id = e.id
+			WHERE e.is_active = true AND d.name != 'Board of Directors' AND (u.role IS NULL OR u.role != 'admin') AND e.id NOT IN (
 				SELECT employee_id FROM evaluations WHERE period_id = ? AND status IN ('submitted', 'draft')
 			)
 		`, activePeriod.ID).Scan(&unevaluatedEmployees)
