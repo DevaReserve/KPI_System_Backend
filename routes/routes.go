@@ -32,6 +32,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	adminStatsCtrl := controllers.NewAdminStatsController(db)
 	kpiTargetCtrl := controllers.NewKPITargetController(db)
 	notificationCtrl := controllers.NewNotificationController(db)
+	passwordResetCtrl := controllers.NewPasswordResetController(db)
 
 	// ---------------------------------------------------------
 	// PUBLIC ROUTES
@@ -41,6 +42,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	{
 		public.POST("/auth/login", authController.Login)
 		public.GET("/ping", pingController.Ping)
+
+		// Password Reset (Public - tanpa auth)
+		public.POST("/auth/forgot-password", passwordResetCtrl.ForgotPassword)
+		public.POST("/auth/verify-otp", passwordResetCtrl.VerifyOTP)
+		public.POST("/auth/reset-password", passwordResetCtrl.ResetPassword)
 	}
 
 	// ---------------------------------------------------------
