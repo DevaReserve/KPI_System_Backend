@@ -21,6 +21,7 @@ func main() {
     config.InitINIConfig()
     config.LoadAppPort()
     config.LoadJWTConfig()
+    config.LoadSMTPConfig()
     
     // 3. Inisialisasi database
     db, err := database.InitDB()

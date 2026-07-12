@@ -48,6 +48,7 @@ func InitDB() (*gorm.DB, error) {
 		&models.Warning{},
 		&models.KPITarget{}, // [BARU] Tabel target KPI
 		&models.Notification{},
+		&models.PasswordReset{}, // [BARU] Tabel reset password OTP
 	)
 	
 	if err != nil {

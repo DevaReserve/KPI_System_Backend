@@ -71,3 +71,30 @@ func LoadJWTConfig() {
 		JWTExpiry = 24
 	}
 }
+
+// --- SMTP Configuration ---
+
+var (
+	SMTPHost           string
+	SMTPPort           string
+	SMTPSenderEmail    string
+	SMTPSenderPassword string
+	SMTPSenderName     string
+)
+
+func LoadSMTPConfig() {
+	if IniConfig != nil {
+		SMTPHost = IniConfig.Section("SMTPConfig").Key("Host").String()
+		SMTPPort = IniConfig.Section("SMTPConfig").Key("Port").String()
+		SMTPSenderEmail = IniConfig.Section("SMTPConfig").Key("SenderEmail").String()
+		SMTPSenderPassword = IniConfig.Section("SMTPConfig").Key("SenderPassword").String()
+		SMTPSenderName = IniConfig.Section("SMTPConfig").Key("SenderName").String()
+	}
+	// Fallback values
+	if SMTPHost == "" {
+		SMTPHost = "smtp.gmail.com"
+	}
+	if SMTPPort == "" {
+		SMTPPort = "587"
+	}
+}
