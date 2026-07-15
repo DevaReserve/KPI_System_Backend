@@ -43,3 +43,37 @@ func (ac *ActivityController) GetAllLogs(c *gin.Context) {
 
 	Response(c, http.StatusOK, "Data activity log berhasil diambil", logs)
 }
+
+// GetMyLogs: Mengambil log aktivitas milik pegawai yang sedang login (Audit Trail Saya)
+// @Route: GET /api/activity-logs/my
+func (ac *ActivityController) GetMyLogs(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		Response(c, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	var logs []models.ActivityLog
+	query := ac.DB.Preload("User").Preload("User.Employee").Where("user_id = ?", userID).Order("created_at desc")
+
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	action := c.Query("action")
+
+	if startDate != "" {
+		query = query.Where("DATE(created_at) >= ?", startDate)
+	}
+	if endDate != "" {
+		query = query.Where("DATE(created_at) <= ?", endDate)
+	}
+	if action != "" {
+		query = query.Where("action = ?", action)
+	}
+
+	if err := query.Limit(300).Find(&logs).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal mengambil log aktivitas Anda", nil)
+		return
+	}
+
+	Response(c, http.StatusOK, "Log aktivitas Anda berhasil diambil", logs)
+}

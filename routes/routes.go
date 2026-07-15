@@ -59,6 +59,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 		// Common Routes (Bisa diakses semua user login)
 		protected.GET("/auth/profile", authController.GetProfile)
 		protected.PUT("/auth/change-password", authController.ChangePassword)
+		protected.PUT("/auth/biodata", authController.UpdateBiodata)
+		protected.POST("/auth/phone/send-otp", authController.SendPhoneOTP)
+		protected.POST("/auth/phone/verify-otp", authController.VerifyPhoneOTP)
+		protected.POST("/auth/logout", authController.Logout)
+		protected.GET("/activity-logs/my", activityCtrl.GetMyLogs)
 		protected.GET("/periods", periodController.GetAllPeriods)
 
 		// Notifications
@@ -153,10 +158,10 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			managerRoutes.GET("/targets/indicators-division", kpiTargetCtrl.GetIndicatorsForDivision)   // Ambil indikator
 
 
-			// Achievement
+			// Employee Detail & Achievement (untuk Manajer melihat profil bawahannya)
+			managerRoutes.GET("/employees/:id", employeeController.GetEmployee)
 			managerRoutes.GET("/employees/:id/achievements", achievementsCtrl.GetEmployeeAchievements)
 
-			
 			// Warnings
 			managerRoutes.POST("/warnings", warningCtrl.CreateWarning)
 			managerRoutes.GET("/warnings", warningCtrl.GetTeamWarnings)

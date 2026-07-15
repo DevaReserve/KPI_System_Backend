@@ -46,6 +46,9 @@ type EmployeeUpdateRequest struct {
 	Position           string    `json:"position" binding:"required"`
 	DirectSupervisorID *uint     `json:"direct_supervisor_id"`
 	JoinDate           time.Time `json:"join_date" binding:"required"`
+	Phone              string    `json:"phone"`
+	Bio                string    `json:"bio"`
+	SocialMedia        string    `json:"social_media"`
 
 	// Data User yang bisa diubah
 	Username string `json:"username" binding:"required"`
@@ -111,6 +114,24 @@ func (ec *EmployeeController) CreateEmployee(c *gin.Context) {
 		Response(c, http.StatusInternalServerError, "Gagal menyimpan data", nil)
 		return
 	}
+
+	// 1. Buat Notifikasi Internal di Aplikasi untuk pegawai baru
+	notif := models.Notification{
+		UserID:  user.ID,
+		Title:   "Selamat Datang di Aplikasi KPI!",
+		Message: "Akun Anda telah dibuat. Diharapkan segera untuk melengkapi data diri di menu Profil Saya (No. Telepon, Alamat, Media Sosial, dll) agar informasi kontak dan biodata Anda tersedia di sistem.",
+		Type:    "profile",
+		IsRead:  false,
+	}
+	ec.DB.Create(&notif)
+
+	// 2. Kirim Email Notifikasi ke pegawai secara asinkron (tanpa memblokir response)
+	if employee.Email != "" {
+		go func(toEmail, name, uname, rawPass string) {
+			_ = helper.SendNewAccountEmail(toEmail, name, uname, rawPass)
+		}(employee.Email, employee.Name, user.Username, req.Password)
+	}
+
 	user.PasswordHash = ""
 	response := gin.H{"employee": employee, "user": user}
 	Response(c, http.StatusCreated, db_var.MsgEmployeeCreated, response)
@@ -195,6 +216,9 @@ func (ec *EmployeeController) UpdateEmployee(c *gin.Context) {
 	employee.DirectSupervisorID = req.DirectSupervisorID
 	employee.JoinDate = req.JoinDate
 	employee.IsActive = req.IsActive
+	employee.Phone = req.Phone
+	employee.Bio = req.Bio
+	employee.SocialMedia = req.SocialMedia
 	user.Username = req.Username
 	user.Role = req.Role
 	user.IsActive = req.IsActive

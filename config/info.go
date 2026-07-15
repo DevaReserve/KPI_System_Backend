@@ -84,17 +84,36 @@ var (
 
 func LoadSMTPConfig() {
 	if IniConfig != nil {
+		// 1. Coba baca dari section [SMTPConfig]
 		SMTPHost = IniConfig.Section("SMTPConfig").Key("Host").String()
 		SMTPPort = IniConfig.Section("SMTPConfig").Key("Port").String()
 		SMTPSenderEmail = IniConfig.Section("SMTPConfig").Key("SenderEmail").String()
 		SMTPSenderPassword = IniConfig.Section("SMTPConfig").Key("SenderPassword").String()
 		SMTPSenderName = IniConfig.Section("SMTPConfig").Key("SenderName").String()
+
+		// 2. Fallback jika ditulis di root/DEFAULT tanpa header [SMTPConfig] atau dengan nama SMTP_HOST / SMTP_EMAIL
+		if SMTPHost == "" {
+			SMTPHost = IniConfig.Section("").Key("SMTP_HOST").String()
+		}
+		if SMTPPort == "" {
+			SMTPPort = IniConfig.Section("").Key("SMTP_PORT").String()
+		}
+		if SMTPSenderEmail == "" {
+			SMTPSenderEmail = IniConfig.Section("").Key("SMTP_EMAIL").String()
+		}
+		if SMTPSenderPassword == "" {
+			SMTPSenderPassword = IniConfig.Section("").Key("SMTP_PASSWORD").String()
+		}
 	}
-	// Fallback values
+
+	// 3. Fallback ke default & nilai aman
 	if SMTPHost == "" {
 		SMTPHost = "smtp.gmail.com"
 	}
 	if SMTPPort == "" {
 		SMTPPort = "587"
+	}
+	if SMTPSenderName == "" {
+		SMTPSenderName = "KPI System Admin"
 	}
 }

@@ -29,7 +29,7 @@ var (
 	failedLoginAttempts   = make(map[string]*loginAttemptInfo)
 	failedAuditTimestamps = make(map[string]time.Time)
 	maxFailedAttempts     = 5
-	attemptWindow         = 1 * time.Hour
+	attemptWindow         = 24 * time.Hour
 	blockDuration         = 1 * time.Hour
 	auditSuppressWindow   = 1 * time.Minute
 )
@@ -94,6 +94,22 @@ func (ac *AuthController) Login(c *gin.Context) {
 	// Update last login
 	ac.DB.Model(&user).Update("last_login", time.Now())
 
+	// [AUTO-NOTIFICATION] Jika pegawai belum melengkapi No. Telepon
+	if user.EmployeeID != 0 && user.Employee.Phone == "" {
+		var count int64
+		ac.DB.Model(&models.Notification{}).Where("user_id = ? AND type = ? AND is_read = ?", user.ID, "profile", false).Count(&count)
+		if count == 0 {
+			notif := models.Notification{
+				UserID:  user.ID,
+				Title:   "Lengkapi No. Telepon Anda",
+				Message: "Harap segera lengkapi No. Telepon/WhatsApp di menu Profil Saya agar mudah dihubungi oleh atasan atau Admin.",
+				Type:    "profile",
+				IsRead:  false,
+			}
+			ac.DB.Create(&notif)
+		}
+	}
+
 	// --- [AUDIT TRAIL] LOG ACTIVITY ---
 	helper.LogActivityWithUsername(ac.DB, user.ID, loginReq.Username, "LOGIN", "User berhasil login", ip)
 
@@ -153,13 +169,24 @@ func (ac *AuthController) recordFailedLogin(ip string) {
 
 	attempt.Count++
 	if attempt.Count >= maxFailedAttempts {
-		attempt.BlockedUntil = now.Add(blockDuration)
+		var extraBlock time.Duration
+		switch attempt.Count {
+		case 5:
+			extraBlock = 5 * time.Minute
+		case 6:
+			extraBlock = 10 * time.Minute
+		case 7:
+			extraBlock = 30 * time.Minute
+		case 8:
+			extraBlock = 1 * time.Hour
+		default: // 9 atau lebih
+			extraBlock = 24 * time.Hour
+		}
+		attempt.BlockedUntil = now.Add(extraBlock)
 	}
 }
 
 func (ac *AuthController) maybeLogFailedAttempt(userID uint, username, action, description, ip string) {
-	// Use IP + action only so audit entries from the same IP are grouped as one actor,
-	// even when the attempted username differs.
 	key := fmt.Sprintf("%s|%s", ip, action)
 	failedLoginMu.Lock()
 	defer failedLoginMu.Unlock()
@@ -193,8 +220,201 @@ func (ac *AuthController) GetProfile(c *gin.Context) {
 		return
 	}
 
-	// [ANTI-SPAM]: Tidak perlu log untuk Read (Get Profile)
 	Response(c, http.StatusOK, "Profile retrieved successfully", user)
+}
+
+type UpdateBiodataRequest struct {
+	Phone                 string `json:"phone"`
+	Bio                   string `json:"bio"`
+	SocialMedia           string `json:"social_media"`
+	Address               string `json:"address"`
+	BirthPlace            string `json:"birth_place"`
+	BirthDate             string `json:"birth_date"`
+	Gender                string `json:"gender"`
+	Education             string `json:"education"`
+	EmergencyContactName  string `json:"emergency_contact_name"`
+	EmergencyContactPhone string `json:"emergency_contact_phone"`
+}
+
+func (ac *AuthController) UpdateBiodata(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		Response(c, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	var req UpdateBiodataRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Response(c, http.StatusBadRequest, "Format biodata tidak valid", nil)
+		return
+	}
+
+	var user models.User
+	if err := ac.DB.First(&user, userID).Error; err != nil {
+		Response(c, http.StatusNotFound, "User tidak ditemukan", nil)
+		return
+	}
+
+	if user.EmployeeID == 0 {
+		Response(c, http.StatusBadRequest, "Akun Anda tidak terhubung ke data pegawai", nil)
+		return
+	}
+
+	var emp models.Employee
+	if err := ac.DB.First(&emp, user.EmployeeID).Error; err != nil {
+		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan", nil)
+		return
+	}
+
+	isPhoneChanged := emp.Phone != req.Phone
+
+	updates := map[string]interface{}{
+		"phone":                   req.Phone,
+		"bio":                     req.Bio,
+		"social_media":            req.SocialMedia,
+		"address":                 req.Address,
+		"birth_place":             req.BirthPlace,
+		"birth_date":              req.BirthDate,
+		"gender":                  req.Gender,
+		"education":               req.Education,
+		"emergency_contact_name":  req.EmergencyContactName,
+		"emergency_contact_phone": req.EmergencyContactPhone,
+	}
+
+	if isPhoneChanged {
+		updates["is_phone_verified"] = false
+		updates["phone_otp"] = ""
+		updates["phone_otp_expired_at"] = nil
+	}
+
+	if err := ac.DB.Model(&emp).Updates(updates).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal memperbarui biodata", nil)
+		return
+	}
+
+	// [CLEAR NOTIFICATION] Jika phone sudah diisi, otomatis tandai notifikasi profil sebagai read
+	if req.Phone != "" {
+		ac.DB.Model(&models.Notification{}).Where("user_id = ? AND type = ?", user.ID, "profile").Update("is_read", true)
+	}
+
+	if idUint, ok := userID.(uint); ok {
+		helper.LogActivity(ac.DB, idUint, "UPDATE_BIODATA", "User memperbarui biodata dan nomor telepon", c.ClientIP())
+	}
+
+	var updatedUser models.User
+	ac.DB.Preload("Employee").Preload("Employee.Division").First(&updatedUser, userID)
+
+	Response(c, http.StatusOK, "Biodata berhasil diperbarui", updatedUser)
+}
+
+func (ac *AuthController) SendPhoneOTP(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		Response(c, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	var user models.User
+	if err := ac.DB.Preload("Employee").First(&user, userID).Error; err != nil {
+		Response(c, http.StatusNotFound, "User tidak ditemukan", nil)
+		return
+	}
+
+	if user.EmployeeID == 0 {
+		Response(c, http.StatusBadRequest, "Akun Anda tidak terhubung dengan data pegawai", nil)
+		return
+	}
+
+	if user.Employee.Phone == "" {
+		Response(c, http.StatusBadRequest, "Silakan lengkapi nomor telepon terlebih dahulu", nil)
+		return
+	}
+
+	otpCode, err := helper.GenerateOTP()
+	if err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal membuat OTP", nil)
+		return
+	}
+
+	expiry := time.Now().Add(10 * time.Minute)
+	
+	if err := ac.DB.Model(&models.Employee{}).Where("id = ?", user.EmployeeID).Updates(map[string]interface{}{
+		"phone_otp":            otpCode,
+		"phone_otp_expired_at": &expiry,
+		"is_phone_verified":   false,
+	}).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal menyimpan OTP", nil)
+		return
+	}
+
+	go func(email, otp, phone string) {
+		_ = helper.SendPhoneOTPEmail(email, otp, phone)
+	}(user.Employee.Email, otpCode, user.Employee.Phone)
+
+	if idUint, ok := userID.(uint); ok {
+		helper.LogActivity(ac.DB, idUint, "SEND_PHONE_OTP", "Mengirim kode OTP verifikasi nomor telepon ke email", c.ClientIP())
+	}
+
+	Response(c, http.StatusOK, "Kode verifikasi OTP berhasil dikirim ke email Anda", nil)
+}
+
+type VerifyPhoneOTPRequest struct {
+	OTP string `json:"otp" binding:"required,len=6"`
+}
+
+func (ac *AuthController) VerifyPhoneOTP(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		Response(c, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	var req VerifyPhoneOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Response(c, http.StatusBadRequest, "Format OTP tidak valid. Harus 6 digit.", nil)
+		return
+	}
+
+	var user models.User
+	if err := ac.DB.Preload("Employee").First(&user, userID).Error; err != nil {
+		Response(c, http.StatusNotFound, "User tidak ditemukan", nil)
+		return
+	}
+
+	if user.EmployeeID == 0 {
+		Response(c, http.StatusBadRequest, "Akun Anda tidak terhubung dengan data pegawai", nil)
+		return
+	}
+
+	if user.Employee.PhoneOTP == "" || user.Employee.PhoneOTPExpiredAt == nil {
+		Response(c, http.StatusBadRequest, "Tidak ada permintaan OTP aktif atau OTP sudah kedaluwarsa", nil)
+		return
+	}
+
+	if time.Now().After(*user.Employee.PhoneOTPExpiredAt) {
+		Response(c, http.StatusBadRequest, "Kode OTP sudah kedaluwarsa. Silakan minta kode baru.", nil)
+		return
+	}
+
+	if user.Employee.PhoneOTP != req.OTP {
+		Response(c, http.StatusBadRequest, "Kode OTP yang Anda masukkan salah", nil)
+		return
+	}
+
+	if err := ac.DB.Model(&models.Employee{}).Where("id = ?", user.EmployeeID).Updates(map[string]interface{}{
+		"phone_otp":            "",
+		"phone_otp_expired_at": nil,
+		"is_phone_verified":   true,
+	}).Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal memperbarui status verifikasi", nil)
+		return
+	}
+
+	if idUint, ok := userID.(uint); ok {
+		helper.LogActivity(ac.DB, idUint, "VERIFY_PHONE_OTP", "Berhasil memverifikasi nomor telepon", c.ClientIP())
+	}
+
+	Response(c, http.StatusOK, "Nomor telepon berhasil diverifikasi!", nil)
 }
 
 type ChangePasswordRequest struct {
@@ -203,51 +423,58 @@ type ChangePasswordRequest struct {
 }
 
 func (ac *AuthController) ChangePassword(c *gin.Context) {
-	// 1. Ambil UserID dari Token
 	userID, exists := c.Get("userID")
 	if !exists {
 		Response(c, http.StatusUnauthorized, "Unauthorized", nil)
 		return
 	}
 
-	// 2. Bind Request
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Response(c, http.StatusBadRequest, "Format password tidak valid (min 6 karakter)", nil)
 		return
 	}
 
-	// 3. Cari User di Database
 	var user models.User
 	if err := ac.DB.First(&user, userID).Error; err != nil {
 		Response(c, http.StatusNotFound, "User tidak ditemukan", nil)
 		return
 	}
 
-	// 4. Verifikasi Password Lama
 	if !helper.CheckPasswordHash(req.OldPassword, user.PasswordHash) {
 		Response(c, http.StatusBadRequest, "Password lama salah", nil)
 		return
 	}
 
-	// 5. Hash Password Baru
 	newHash, err := helper.HashPassword(req.NewPassword)
 	if err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal memproses password baru", nil)
 		return
 	}
 
-	// 6. Simpan Password Baru
 	if err := ac.DB.Model(&user).Update("password_hash", newHash).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal mengupdate password", nil)
 		return
 	}
 
-	// --- [AUDIT TRAIL] ---
-	// Aksi sensitif seperti ganti password wajib dicatat
 	if idUint, ok := userID.(uint); ok {
 		helper.LogActivity(ac.DB, idUint, "CHANGE_PASSWORD", "User mengubah password", c.ClientIP())
 	}
 
 	Response(c, http.StatusOK, "Password berhasil diubah", nil)
+}
+
+func (ac *AuthController) Logout(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		Response(c, http.StatusOK, "Logout berhasil", nil)
+		return
+	}
+
+	var user models.User
+	if err := ac.DB.First(&user, userID).Error; err == nil {
+		helper.LogActivityWithUsername(ac.DB, user.ID, user.Username, "LOGOUT", "User keluar dari sistem (Logout)", c.ClientIP())
+	}
+
+	Response(c, http.StatusOK, "Logout berhasil", nil)
 }

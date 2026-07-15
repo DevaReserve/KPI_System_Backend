@@ -68,6 +68,26 @@ func (wc *WarningController) CreateWarning(c *gin.Context) {
 		return
 	}
 
+	// 4. Kirim Notifikasi In-App ke Pegawai
+	var targetUser models.User
+	wc.DB.Where("employee_id = ?", targetEmployee.ID).First(&targetUser)
+	if targetUser.ID != 0 {
+		notif := models.Notification{
+			UserID:  targetUser.ID,
+			Title:   "Peringatan Baru: " + warning.Level,
+			Message: "Anda mendapatkan Surat Peringatan (" + warning.Level + "). Silakan periksa di menu Riwayat SP.",
+			Type:    "warning",
+		}
+		wc.DB.Create(&notif)
+	}
+
+	// 5. Kirim Notifikasi Email Secara Asinkron
+	if targetEmployee.Email != "" {
+		go func(email, name, level, reason, desc string) {
+			_ = helper.SendWarningEmail(email, name, level, reason, desc)
+		}(targetEmployee.Email, targetEmployee.Name, warning.Level, warning.Reason, warning.Description)
+	}
+
 	// --- [AUDIT TRAIL] ---
 	// Mencatat tindakan pendisiplinan (PENTING)
 	if idUint, ok := issuerUserID.(uint); ok {

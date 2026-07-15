@@ -194,7 +194,7 @@ func (kc *KPITargetController) GetIndicatorsForTarget(c *gin.Context) {
 	var indicators []models.PerformanceIndicator
 	kc.DB.Where(
 		kc.DB.Where("indicator_type = ?", "umum").
-			Or("indicator_type = ? AND division_id = ?", "spesifik", employee.DivisionID),
+			Or("indicator_type = ? AND (division_id = ? OR id IN (SELECT performance_indicator_id FROM indicator_divisions WHERE division_id = ?))", "spesifik", employee.DivisionID, employee.DivisionID),
 	).Find(&indicators)
 
 	Response(c, http.StatusOK, "Indikator berhasil diambil", indicators)
@@ -214,7 +214,7 @@ func (kc *KPITargetController) GetIndicatorsForDivision(c *gin.Context) {
 	var indicators []models.PerformanceIndicator
 	kc.DB.Where(
 		kc.DB.Where("indicator_type = ?", "umum").
-			Or("indicator_type = ? AND division_id = ?", "spesifik", divisionID),
+			Or("indicator_type = ? AND (division_id = ? OR id IN (SELECT performance_indicator_id FROM indicator_divisions WHERE division_id = ?))", "spesifik", divisionID, divisionID),
 	).Find(&indicators)
 
 	Response(c, http.StatusOK, "Indikator divisi berhasil diambil", indicators)

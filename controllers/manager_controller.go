@@ -165,7 +165,7 @@ func (mc *ManagerController) StartEvaluation(c *gin.Context) {
 	var indicators []models.PerformanceIndicator
 	if err := mc.DB.Where(
 		mc.DB.Where("indicator_type = ?", db_var.IndicatorTypeUmum).
-		Or("indicator_type = ? AND division_id = ?", db_var.IndicatorTypeSpesifik, employee.DivisionID),
+		Or("indicator_type = ? AND (division_id = ? OR id IN (SELECT performance_indicator_id FROM indicator_divisions WHERE division_id = ?))", db_var.IndicatorTypeSpesifik, employee.DivisionID, employee.DivisionID),
 	).Find(&indicators).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal mengambil indikator penilaian", nil)
 		return
@@ -479,6 +479,30 @@ func CheckAndGenerateAutomaticSP(tx *gorm.DB, employeeID uint, currentScore floa
 
 	if err := tx.Create(&newWarning).Error; err != nil {
 		return err
+	}
+
+	// 5. Ambil data pegawai untuk kebutuhan notifikasi
+	var targetEmployee models.Employee
+	if err := tx.First(&targetEmployee, employeeID).Error; err == nil {
+		// Kirim Notifikasi In-App ke Pegawai
+		var targetUser models.User
+		tx.Where("employee_id = ?", employeeID).First(&targetUser)
+		if targetUser.ID != 0 {
+			notif := models.Notification{
+				UserID:  targetUser.ID,
+				Title:   "Peringatan Baru: " + newWarning.Level,
+				Message: "Anda mendapatkan Surat Peringatan (" + newWarning.Level + "). Silakan periksa di menu Riwayat SP.",
+				Type:    "warning",
+			}
+			_ = tx.Create(&notif).Error
+		}
+
+		// Kirim Notifikasi Email Secara Asinkron
+		if targetEmployee.Email != "" {
+			go func(email, name, level, reason, desc string) {
+				_ = helper.SendWarningEmail(email, name, level, reason, desc)
+			}(targetEmployee.Email, targetEmployee.Name, newWarning.Level, newWarning.Reason, newWarning.Description)
+		}
 	}
 
 	return nil
