@@ -33,6 +33,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	kpiTargetCtrl := controllers.NewKPITargetController(db)
 	notificationCtrl := controllers.NewNotificationController(db)
 	passwordResetCtrl := controllers.NewPasswordResetController(db)
+	whatsAppCtrl := controllers.NewWhatsAppController(db)
 
 	// ---------------------------------------------------------
 	// PUBLIC ROUTES
@@ -134,6 +135,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 
 			// Reports + Comparison
 			adminRoutes.GET("/reports/comparison", reportController.GetPeriodComparison) // [BARU] Komparasi 2 Periode
+
+			// WhatsApp Bot Status
+			adminRoutes.GET("/wa/status", whatsAppCtrl.GetWAStatus) // Status & QR Code WhatsApp Bot
 		}
 
 		// ---------------------------------------------------------

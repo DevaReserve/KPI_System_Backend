@@ -336,7 +336,7 @@ func (ac *AuthController) SendPhoneOTP(c *gin.Context) {
 		return
 	}
 
-	expiry := time.Now().Add(10 * time.Minute)
+	expiry := time.Now().Add(5 * time.Minute)
 	
 	if err := ac.DB.Model(&models.Employee{}).Where("id = ?", user.EmployeeID).Updates(map[string]interface{}{
 		"phone_otp":            otpCode,
@@ -347,15 +347,29 @@ func (ac *AuthController) SendPhoneOTP(c *gin.Context) {
 		return
 	}
 
-	go func(email, otp, phone string) {
-		_ = helper.SendPhoneOTPEmail(email, otp, phone)
-	}(user.Employee.Email, otpCode, user.Employee.Phone)
+	// Kirim OTP via WhatsApp (utama), dengan fallback ke email jika WA belum siap
+	go func(phone, otp, name, email string) {
+		if helper.IsWhatsAppReady() {
+			err := helper.SendPhoneOTPWhatsApp(phone, otp, name)
+			if err != nil {
+				// Fallback ke email jika WhatsApp gagal
+				_ = helper.SendPhoneOTPEmail(email, otp, phone)
+			}
+		} else {
+			// WhatsApp belum siap, kirim via email sebagai fallback
+			_ = helper.SendPhoneOTPEmail(email, otp, phone)
+		}
+	}(user.Employee.Phone, otpCode, user.Employee.Name, user.Employee.Email)
 
 	if idUint, ok := userID.(uint); ok {
-		helper.LogActivity(ac.DB, idUint, "SEND_PHONE_OTP", "Mengirim kode OTP verifikasi nomor telepon ke email", c.ClientIP())
+		helper.LogActivity(ac.DB, idUint, "SEND_PHONE_OTP", "Mengirim kode OTP verifikasi nomor telepon via WhatsApp", c.ClientIP())
 	}
 
-	Response(c, http.StatusOK, "Kode verifikasi OTP berhasil dikirim ke email Anda", nil)
+	if helper.IsWhatsAppReady() {
+		Response(c, http.StatusOK, "Kode verifikasi OTP berhasil dikirim ke WhatsApp Anda", nil)
+	} else {
+		Response(c, http.StatusOK, "WhatsApp bot belum terhubung. Kode OTP dikirim ke email Anda sebagai alternatif", nil)
+	}
 }
 
 type VerifyPhoneOTPRequest struct {

@@ -101,19 +101,19 @@ func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
 	}
 
 	var response []TeamStatusResponse
-    
     for _, employee := range team {
-        var evaluation models.Evaluation
+        var evaluations []models.Evaluation
         status := TeamStatusResponse{
             EmployeeID:        employee.ID,
             EmployeeName:      employee.Name,
-            ProfilePictureURL: employee.ProfilePictureURL, // <--- ISI DATANYA DARI EMPLOYEE
+            ProfilePictureURL: employee.ProfilePictureURL,
             EvaluationStatus:  "Belum Dibuat",
         }
         
-        err := mc.DB.Where("employee_id = ? AND period_id = ?", employee.ID, activePeriod.ID).First(&evaluation).Error
+        err := mc.DB.Where("employee_id = ? AND period_id = ?", employee.ID, activePeriod.ID).Limit(1).Find(&evaluations).Error
         
-        if err == nil {
+        if err == nil && len(evaluations) > 0 {
+            evaluation := evaluations[0]
             status.EvaluationID = &evaluation.ID
             status.EvaluationStatus = evaluation.Status
         }

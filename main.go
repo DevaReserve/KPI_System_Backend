@@ -3,6 +3,7 @@ package main
 import (
     "KPI_System_Backend/config"
     "KPI_System_Backend/database"
+    "KPI_System_Backend/helper"
     "KPI_System_Backend/logger"
     "KPI_System_Backend/middleware"
     "KPI_System_Backend/routes"
@@ -36,6 +37,10 @@ func main() {
     if _, err := os.Stat("./uploads/documents"); os.IsNotExist(err) {
         os.MkdirAll("./uploads/documents", os.ModePerm)
     }
+
+    // 4. Inisialisasi WhatsApp client (untuk pengiriman OTP)
+    // Session disimpan di wa_session.db - jika belum login, QR Code akan tampil di terminal.
+    go helper.InitWhatsApp()
     
 // 4. Setup Gin
     router := gin.Default()
