@@ -93,33 +93,36 @@ func (mc *ManagerController) GetTeamEvaluationStatus(c *gin.Context) {
 	}
 
 	type TeamStatusResponse struct {
-		EmployeeID        uint   `json:"employee_id"`
-        EmployeeName      string `json:"employee_name"`
-        ProfilePictureURL string `json:"profile_picture_url"` // <--- TAMBAHKAN INI
-        EvaluationID      *uint  `json:"evaluation_id"`
-        EvaluationStatus  string `json:"evaluation_status"`
+		EmployeeID        uint    `json:"employee_id"`
+		EmployeeName      string  `json:"employee_name"`
+		ProfilePictureURL string  `json:"profile_picture_url"`
+		EvaluationID      *uint   `json:"evaluation_id"`
+		EvaluationStatus  string  `json:"evaluation_status"`
+		TotalScore        float64 `json:"total_score"`
 	}
 
 	var response []TeamStatusResponse
-    for _, employee := range team {
-        var evaluations []models.Evaluation
-        status := TeamStatusResponse{
-            EmployeeID:        employee.ID,
-            EmployeeName:      employee.Name,
-            ProfilePictureURL: employee.ProfilePictureURL,
-            EvaluationStatus:  "Belum Dibuat",
-        }
-        
-        err := mc.DB.Where("employee_id = ? AND period_id = ?", employee.ID, activePeriod.ID).Limit(1).Find(&evaluations).Error
-        
-        if err == nil && len(evaluations) > 0 {
-            evaluation := evaluations[0]
-            status.EvaluationID = &evaluation.ID
-            status.EvaluationStatus = evaluation.Status
-        }
-        
-        response = append(response, status)
-    }
+	for _, employee := range team {
+		var evaluations []models.Evaluation
+		status := TeamStatusResponse{
+			EmployeeID:        employee.ID,
+			EmployeeName:      employee.Name,
+			ProfilePictureURL: employee.ProfilePictureURL,
+			EvaluationStatus:  "Belum Dibuat",
+			TotalScore:        0,
+		}
+		
+		err := mc.DB.Where("employee_id = ? AND period_id = ?", employee.ID, activePeriod.ID).Limit(1).Find(&evaluations).Error
+		
+		if err == nil && len(evaluations) > 0 {
+			evaluation := evaluations[0]
+			status.EvaluationID = &evaluation.ID
+			status.EvaluationStatus = evaluation.Status
+			status.TotalScore = evaluation.TotalScore
+		}
+		
+		response = append(response, status)
+	}
     
     Response(c, http.StatusOK, "Status evaluasi tim berhasil diambil", response)
 }
