@@ -209,6 +209,27 @@ func (ec *EmployeeController) UpdateEmployee(c *gin.Context) {
 		Response(c, http.StatusNotFound, "Data user untuk pegawai ini tidak ditemukan", nil)
 		return
 	}
+
+	// ===== SUPERADMIN PROTECTION =====
+	// Jika target edit adalah akun superadmin, lindungi field-field kritis.
+	// Field biografi (nama, email, divisi, dll) tetap boleh diedit.
+	// Ini adalah pertahanan server-side yang tidak bisa di-bypass via browser.
+	if user.Username == "superadmin" {
+		// Kembalikan field kritis ke nilai aslinya, abaikan apa yang dikirim client
+		req.Username = user.Username
+		req.Role = user.Role
+		req.IsActive = user.IsActive
+		req.IsExecutive = user.IsExecutive
+
+		// Log percobaan manipulasi jika ada field kritis yang coba diubah
+		actorID, _ := c.Get("userID")
+		if idUint, ok := actorID.(uint); ok {
+			helper.LogActivity(ec.DB, idUint, "SUPERADMIN_TAMPER_ATTEMPT",
+				"Percobaan mengubah field kritis akun superadmin diblokir oleh sistem", c.ClientIP())
+		}
+	}
+	// ===== END SUPERADMIN PROTECTION =====
+
 	employee.Name = req.Name
 	employee.Email = req.Email
 	employee.DivisionID = req.DivisionID
@@ -238,8 +259,7 @@ func (ec *EmployeeController) UpdateEmployee(c *gin.Context) {
 		return
 	}
 
-	// --- LOG ACTIVITY (Baris Baru) ---
-	// Ambil ID User yang sedang login (Pelaku Edit)
+	// --- LOG ACTIVITY ---
 	actorID, _ := c.Get("userID")
 	if idUint, ok := actorID.(uint); ok {
 		helper.LogActivity(ec.DB, idUint, "UPDATE_EMPLOYEE", "Mengupdate data pegawai: "+employee.Name, c.ClientIP())
@@ -283,6 +303,20 @@ func (ec *EmployeeController) DeleteEmployee(c *gin.Context) {
 		return
 	}
 
+	// ===== SUPERADMIN PROTECTION =====
+	// Akun superadmin tidak boleh dinonaktifkan oleh siapapun.
+	if user.Username == "superadmin" {
+		tx.Rollback()
+		actorID, _ := c.Get("userID")
+		if idUint, ok := actorID.(uint); ok {
+			helper.LogActivity(ec.DB, idUint, "SUPERADMIN_TAMPER_ATTEMPT",
+				"Percobaan menonaktifkan akun superadmin diblokir oleh sistem", c.ClientIP())
+		}
+		Response(c, http.StatusForbidden, "Akun superadmin tidak dapat dinonaktifkan", nil)
+		return
+	}
+	// ===== END SUPERADMIN PROTECTION =====
+
 	// 5. Lakukan "Soft Delete"
 	employee.IsActive = false
 	user.IsActive = false
@@ -320,9 +354,22 @@ func (ec *EmployeeController) ResetPassword(c *gin.Context) {
 		return
 	}
 
+	// ===== SUPERADMIN PROTECTION =====
+	// Password superadmin tidak bisa direset oleh admin manapun.
+	// Superadmin harus ganti password sendiri melalui menu profil.
+	if user.Username == "superadmin" {
+		actorID, _ := c.Get("userID")
+		if idUint, ok := actorID.(uint); ok {
+			helper.LogActivity(ec.DB, idUint, "SUPERADMIN_TAMPER_ATTEMPT",
+				"Percobaan mereset password akun superadmin diblokir oleh sistem", c.ClientIP())
+		}
+		Response(c, http.StatusForbidden, "Password akun superadmin tidak dapat direset melalui panel ini", nil)
+		return
+	}
+	// ===== END SUPERADMIN PROTECTION =====
+
 	// 2. Hash Password Default ('cakra123')
-	// Pastikan Anda sudah import "KPI_System_Backend/helper"
-	newHash, err := helper.HashPassword("cakra123") 
+	newHash, err := helper.HashPassword("cakra123")
 	if err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal memproses password", nil)
 		return
