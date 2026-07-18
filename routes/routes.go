@@ -189,6 +189,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			employeeRoutes.GET("/history", myPerformanceController.GetMyPerformanceHistory)
 			employeeRoutes.GET("/latest", myPerformanceController.GetMyLatestPerformance)
 			employeeRoutes.GET("/evaluations/:id", myPerformanceController.GetMyEvaluationDetail)
+			employeeRoutes.GET("/top-one", myPerformanceController.GetMyTopOneStatus)
 
 			// Upload Foto Profil
 			employeeRoutes.POST("/upload-avatar", uploadCtrl.UploadProfilePicture)

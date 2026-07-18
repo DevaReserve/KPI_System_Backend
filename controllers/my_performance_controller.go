@@ -196,3 +196,39 @@ func (pc *MyPerformanceController) GetMyEvaluationDetail(c *gin.Context) {
 
 	Response(c, http.StatusOK, "Detail evaluasi berhasil diambil", response)
 }
+
+// GetMyTopOneStatus: Cek apakah pegawai ini merupakan top performer (skor tertinggi) di periode aktif
+func (pc *MyPerformanceController) GetMyTopOneStatus(c *gin.Context) {
+	employeeID, err := pc.getEmployeeIDFromToken(c)
+	if err != nil {
+		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan", nil)
+		return
+	}
+
+	// 1. Dapatkan periode aktif
+	var activePeriod models.EvaluationPeriod
+	if err := pc.DB.Where("is_active = ?", true).First(&activePeriod).Error; err != nil {
+		Response(c, http.StatusOK, "Tidak ada periode aktif", gin.H{"is_top_one": false})
+		return
+	}
+
+	// 2. Dapatkan pegawai dengan nilai tertinggi di periode tersebut
+	type TopOneEval struct {
+		EmployeeID uint
+	}
+	var topOne TopOneEval
+	if err := pc.DB.Table("evaluations").
+		Select("employee_id").
+		Where("period_id = ? AND status = ?", activePeriod.ID, "submitted").
+		Order("total_score DESC").
+		Limit(1).
+		Scan(&topOne).Error; err != nil || topOne.EmployeeID == 0 {
+		Response(c, http.StatusOK, "Tidak ada data evaluasi", gin.H{"is_top_one": false})
+		return
+	}
+
+	isTopOne := topOne.EmployeeID == employeeID
+	Response(c, http.StatusOK, "Berhasil memeriksa status top 1", gin.H{
+		"is_top_one": isTopOne,
+	})
+}
