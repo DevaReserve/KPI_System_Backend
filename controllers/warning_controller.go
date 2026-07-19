@@ -53,7 +53,54 @@ func (wc *WarningController) CreateWarning(c *gin.Context) {
 		return
 	}
 
-	// 3. Simpan SP
+	// 3. Validasi Level SP yang valid
+	if req.Level != "SP1" && req.Level != "SP2" && req.Level != "SP3" {
+		Response(c, http.StatusBadRequest, "Level SP tidak valid. Gunakan SP1, SP2, atau SP3", nil)
+		return
+	}
+
+	// 4. ===== VALIDASI HAK AKSES BERDASARKAN ROLE =====
+	// SP1 dan SP2 hanya boleh diterbitkan oleh Manager
+	if (req.Level == "SP1" || req.Level == "SP2") && issuerUser.Role != "manager" {
+		Response(c, http.StatusForbidden, "Hanya Manajer yang berhak menerbitkan SP1 dan SP2", nil)
+		return
+	}
+	// SP3 hanya boleh diterbitkan oleh Admin/HRD
+	if req.Level == "SP3" && issuerUser.Role != "admin" {
+		Response(c, http.StatusForbidden, "Hanya Admin/HRD yang berhak menerbitkan SP3", nil)
+		return
+	}
+	// ===== END VALIDASI HAK AKSES =====
+
+	// 5. ===== VALIDASI ALUR BERTAHAP (TIDAK BOLEH LOMPAT JENJANG) =====
+	sixMonthsAgo := time.Now().AddDate(0, -6, 0)
+
+	if req.Level == "SP2" {
+		// Cek apakah ada SP1 aktif (< 6 bulan) untuk pegawai ini
+		var sp1Count int64
+		wc.DB.Model(&models.Warning{}).
+			Where("employee_id = ? AND level = ? AND issued_at >= ?", req.EmployeeID, "SP1", sixMonthsAgo).
+			Count(&sp1Count)
+		if sp1Count == 0 {
+			Response(c, http.StatusUnprocessableEntity, "Pegawai harus mendapatkan SP 1 terlebih dahulu sebelum dapat diberikan SP 2", nil)
+			return
+		}
+	}
+
+	if req.Level == "SP3" {
+		// Cek apakah ada SP2 aktif (< 6 bulan) untuk pegawai ini
+		var sp2Count int64
+		wc.DB.Model(&models.Warning{}).
+			Where("employee_id = ? AND level = ? AND issued_at >= ?", req.EmployeeID, "SP2", sixMonthsAgo).
+			Count(&sp2Count)
+		if sp2Count == 0 {
+			Response(c, http.StatusUnprocessableEntity, "Pegawai harus mendapatkan SP 2 terlebih dahulu sebelum dapat diberikan SP 3", nil)
+			return
+		}
+	}
+	// ===== END VALIDASI ALUR BERTAHAP =====
+
+	// 6. Simpan SP
 	warning := models.Warning{
 		EmployeeID:  req.EmployeeID,
 		IssuedByID:  issuerUser.EmployeeID, // ID Pegawai si Admin/Manager
@@ -68,7 +115,7 @@ func (wc *WarningController) CreateWarning(c *gin.Context) {
 		return
 	}
 
-	// 4. Kirim Notifikasi In-App ke Pegawai
+	// 7. Kirim Notifikasi In-App ke Pegawai
 	var targetUser models.User
 	wc.DB.Where("employee_id = ?", targetEmployee.ID).First(&targetUser)
 	if targetUser.ID != 0 {
@@ -81,7 +128,7 @@ func (wc *WarningController) CreateWarning(c *gin.Context) {
 		wc.DB.Create(&notif)
 	}
 
-	// 5. Kirim Notifikasi Email Secara Asinkron
+	// 8. Kirim Notifikasi Email Secara Asinkron
 	if targetEmployee.Email != "" {
 		go func(email, name, level, reason, desc string) {
 			_ = helper.SendWarningEmail(email, name, level, reason, desc)
@@ -138,6 +185,35 @@ func (wc *WarningController) DeleteWarning(c *gin.Context) {
 		Response(c, http.StatusNotFound, "Data tidak ditemukan", nil)
 		return
 	}
+
+	// ===== VALIDASI: LARANGAN HAPUS JIKA ADA SP DI JENJANG LEBIH TINGGI =====
+	// SP1 tidak bisa dihapus jika sudah ada SP2 milik pegawai yang sama
+	if warning.Level == "SP1" {
+		var sp2Count int64
+		wc.DB.Model(&models.Warning{}).
+			Where("employee_id = ? AND level = ?", warning.EmployeeID, "SP2").
+			Count(&sp2Count)
+		if sp2Count > 0 {
+			Response(c, http.StatusConflict,
+				"SP 1 tidak dapat dihapus karena pegawai ini sudah memiliki riwayat SP 2. Hapus SP 2 terlebih dahulu.",
+				nil)
+			return
+		}
+	}
+	// SP2 tidak bisa dihapus jika sudah ada SP3 milik pegawai yang sama
+	if warning.Level == "SP2" {
+		var sp3Count int64
+		wc.DB.Model(&models.Warning{}).
+			Where("employee_id = ? AND level = ?", warning.EmployeeID, "SP3").
+			Count(&sp3Count)
+		if sp3Count > 0 {
+			Response(c, http.StatusConflict,
+				"SP 2 tidak dapat dihapus karena pegawai ini sudah memiliki riwayat SP 3. Hapus SP 3 terlebih dahulu.",
+				nil)
+			return
+		}
+	}
+	// ===== END VALIDASI LARANGAN HAPUS =====
 
 	if err := wc.DB.Delete(&warning).Error; err != nil {
 		Response(c, http.StatusInternalServerError, "Gagal menghapus", nil)
