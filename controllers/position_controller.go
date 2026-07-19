@@ -31,6 +31,16 @@ func (pc *PositionController) CreatePosition(c *gin.Context) {
 		return
 	}
 
+	// --- Validasi Duplikasi ---
+	var count int64
+	pc.DB.Model(&models.Position{}).
+		Where("LOWER(name) = LOWER(?) AND division_id = ?", req.Name, req.DivisionID).
+		Count(&count)
+	if count > 0 {
+		Response(c, http.StatusConflict, "Jabatan dengan nama tersebut sudah ada di divisi ini", nil)
+		return
+	}
+
 	position := models.Position{
 		Name:        req.Name,
 		Description: req.Description,
@@ -75,6 +85,16 @@ func (pc *PositionController) UpdatePosition(c *gin.Context) {
 	var req PositionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Response(c, http.StatusBadRequest, "Format request tidak valid", nil)
+		return
+	}
+
+	// --- Validasi Duplikasi (kecuali jabatan itu sendiri) ---
+	var count int64
+	pc.DB.Model(&models.Position{}).
+		Where("LOWER(name) = LOWER(?) AND division_id = ? AND id != ?", req.Name, req.DivisionID, position.ID).
+		Count(&count)
+	if count > 0 {
+		Response(c, http.StatusConflict, "Jabatan dengan nama tersebut sudah ada di divisi ini", nil)
 		return
 	}
 

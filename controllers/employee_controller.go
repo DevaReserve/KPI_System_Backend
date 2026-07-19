@@ -40,6 +40,7 @@ type EmployeeCreateRequest struct {
 // Struct baru untuk Update
 type EmployeeUpdateRequest struct {
 	// Data Employee yang bisa diubah
+	NIP                string    `json:"nip" binding:"required"`
 	Name               string    `json:"name" binding:"required"`
 	Email              string    `json:"email" binding:"required,email"`
 	DivisionID         uint      `json:"division_id" binding:"required"`
@@ -230,6 +231,7 @@ func (ec *EmployeeController) UpdateEmployee(c *gin.Context) {
 	}
 	// ===== END SUPERADMIN PROTECTION =====
 
+	employee.NIP = req.NIP
 	employee.Name = req.Name
 	employee.Email = req.Email
 	employee.DivisionID = req.DivisionID

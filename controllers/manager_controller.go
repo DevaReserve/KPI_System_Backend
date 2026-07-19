@@ -23,9 +23,10 @@ func NewManagerController(db *gorm.DB) *ManagerController {
 
 type EvaluationSubmitRequest struct {
 	Feedback string `json:"feedback"`
+	IsDraft  bool   `json:"is_draft"`
 	Scores   []struct {
 		ScoreID uint   `json:"score_id" binding:"required"`
-		Score   int    `json:"score" binding:"required,min=1,max=5"`
+		Score   int    `json:"score" binding:"min=0,max=5"`
 		Notes   string `json:"notes"`
 	} `json:"scores" binding:"required"`
 }
@@ -287,6 +288,13 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 		return
 	}
 
+	// Jika status saat ini adalah 'appealed', izinkan revisi oleh manajer (akan di-submit ulang)
+	// Jika status selain draft atau appealed, tolak
+	if evaluation.Status != db_var.EvaluationStatusDraft && evaluation.Status != "appealed" {
+		Response(c, http.StatusBadRequest, "Status evaluasi tidak memungkinkan untuk diubah", nil)
+		return
+	}
+
     // Ambil nama pegawai yang dinilai untuk log (opsional, tapi informatif)
     var targetEmployee models.Employee
     mc.DB.First(&targetEmployee, evaluation.EmployeeID)
@@ -324,10 +332,16 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
 	
 	evaluation.Feedback = req.Feedback
 	evaluation.TotalScore = totalWeightedScore
-	evaluation.Status = db_var.EvaluationStatusSubmitted
-	
-	now := time.Now()
-	evaluation.SubmittedAt = &now
+
+	if req.IsDraft {
+		// Simpan sebagai draft: status tetap 'draft', tidak ada submitted_at
+		evaluation.Status = db_var.EvaluationStatusDraft
+	} else {
+		// Finalisasi: set status submitted dan catat waktu submit
+		evaluation.Status = db_var.EvaluationStatusSubmitted
+		now := time.Now()
+		evaluation.SubmittedAt = &now
+	}
 	
 	if err := tx.Save(&evaluation).Error; err != nil {
         tx.Rollback()
@@ -336,98 +350,103 @@ func (mc *ManagerController) SubmitEvaluation(c *gin.Context) {
     }
 
 	// =================================================================
-	// ---> JALANKAN LOGIKA DETEKSI SP OTOMATIS BERJENJANG DI SINI <---
+	// ---> JALANKAN LOGIKA DETEKSI SP OTOMATIS (hanya saat finalisasi) <---
 	// =================================================================
-	err := CheckAndGenerateAutomaticSP(tx, evaluation.EmployeeID, evaluation.TotalScore, evaluatorEmployeeID)
-	if err != nil {
-		tx.Rollback() // Batalkan submit nilai jika pembuatan SP mengalami kegagalan sistem
-		Response(c, http.StatusInternalServerError, "Gagal memproses pembuatan SP otomatis", nil)
-		return
+	if !req.IsDraft {
+		err := CheckAndGenerateAutomaticSP(tx, evaluation.EmployeeID, evaluation.TotalScore, evaluatorEmployeeID)
+		if err != nil {
+			tx.Rollback()
+			Response(c, http.StatusInternalServerError, "Gagal memproses pembuatan SP otomatis", nil)
+			return
+		}
 	}
 	// =================================================================
 
-if err := tx.Commit().Error; err != nil {
-        Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
-        return
-    }
+	if err := tx.Commit().Error; err != nil {
+		Response(c, http.StatusInternalServerError, "Gagal menyimpan perubahan", nil)
+		return
+	}
 
-    // =================================================================
-    // ---> BUAT NOTIFIKASI IN-APP KE PEGAWAI <---
-    // =================================================================
-    var targetUser models.User
-    mc.DB.Where("employee_id = ?", targetEmployee.ID).First(&targetUser)
-    if targetUser.ID != 0 {
-        var period models.EvaluationPeriod
-        mc.DB.First(&period, evaluation.PeriodID)
-        notif := models.Notification{
-            UserID: targetUser.ID,
-            Title:  "Evaluasi Selesai",
-            Message: fmt.Sprintf("Evaluasi kinerja Anda untuk %s telah selesai dinilai.", period.Name),
-            Type:   "evaluation",
-        }
-        mc.DB.Create(&notif)
-    }
+	// Notifikasi & Email hanya dikirim saat finalisasi (bukan draft)
+	if !req.IsDraft {
+		// =================================================================
+		// ---> BUAT NOTIFIKASI IN-APP KE PEGAWAI <---
+		// =================================================================
+		var targetUser models.User
+		mc.DB.Where("employee_id = ?", targetEmployee.ID).First(&targetUser)
+		if targetUser.ID != 0 {
+			var period models.EvaluationPeriod
+			mc.DB.First(&period, evaluation.PeriodID)
+			notif := models.Notification{
+				UserID:  targetUser.ID,
+				Title:   "Evaluasi Selesai",
+				Message: fmt.Sprintf("Evaluasi kinerja Anda untuk %s telah selesai dinilai.", period.Name),
+				Type:    "evaluation",
+			}
+			mc.DB.Create(&notif)
+		}
 
-    // =================================================================
-    // ---> KIRIM EMAIL NOTIFIKASI KE PEGAWAI SECARA ASINKRON <---
-    // =================================================================
-    // Kita menggunakan perintah 'go func()' agar proses email berjalan
-    // di latar belakang (background). Dengan begini, loading aplikasi
-    // tidak akan tertahan (nge-lag) saat menunggu respon server Gmail.
-go func() {
-        // Pastikan pegawai memiliki email di database
-        if targetEmployee.Email != "" {
-            // 1. Cari nama manajer (evaluator) di database
-            var evaluator models.Employee
-            mc.DB.First(&evaluator, evaluatorEmployeeID)
-            evaluatorName := evaluator.Name
+		// =================================================================
+		// ---> KIRIM EMAIL NOTIFIKASI KE PEGAWAI SECARA ASINKRON <---
+		// =================================================================
+		go func() {
+			if targetEmployee.Email != "" {
+				var evaluator models.Employee
+				mc.DB.First(&evaluator, evaluatorEmployeeID)
+				evaluatorName := evaluator.Name
 
-            // 2. Cari nama periode evaluasi
-            var period models.EvaluationPeriod
-            mc.DB.First(&period, evaluation.PeriodID)
-            periodName := period.Name
+				var period models.EvaluationPeriod
+				mc.DB.First(&period, evaluation.PeriodID)
+				periodName := period.Name
 
-            // 3. Setup Link Aplikasi (Ganti localhost dengan IP WiFi Anda jika ingin diuji di HP)
-            appLink := config.FrontEndURL
+				appLink := config.FrontEndURL
 
-            subject := fmt.Sprintf("Pemberitahuan: Evaluasi Kinerja %s Telah Selesai", periodName)
-            htmlBody := fmt.Sprintf(`
-                <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                    <div style="background-color: #1e40af; padding: 20px; text-align: center;">
-                        <h2 style="color: #ffffff; margin: 0; font-size: 20px;">PT. Cakra Media Data</h2>
-                    </div>
-                    <div style="padding: 30px;">
-                        <p style="font-size: 16px;">Halo, <strong>%s</strong>,</p>
-                        <p style="font-size: 15px; line-height: 1.6; color: #475569;">
-                            Proses penilaian kinerja (KPI) Anda untuk <strong>%s</strong> telah selesai dievaluasi oleh <strong>%s</strong>.
-                        </p>
-                        <div style="background-color: #f8fafc; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0;">
-                            <p style="margin: 0; font-size: 14px; color: #334155;">
-                                Data rapor kinerja, nilai akhir, serta catatan <i>feedback</i> dari manajer Anda sudah dapat diakses melalui portal sistem internal perusahaan.
-                            </p>
-                        </div>
-                        <div style="text-align: center; margin-top: 30px;">
-                            <a href="%s" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">Lihat Rapor Kinerja</a>
-                        </div>
-                    </div>
-                    <div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-top: 1px solid #e2e8f0;">
-                        <p style="font-size: 12px; color: #64748b; margin: 0;">Pesan ini dihasilkan otomatis oleh Sistem KPI. Harap tidak membalas email ini.</p>
-                    </div>
-                </div>
-            `, targetEmployee.Name, periodName, evaluatorName, appLink)
+				subject := fmt.Sprintf("Pemberitahuan: Evaluasi Kinerja %s Telah Selesai", periodName)
+				htmlBody := fmt.Sprintf(`
+					<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+						<div style="background-color: #1e40af; padding: 20px; text-align: center;">
+							<h2 style="color: #ffffff; margin: 0; font-size: 20px;">PT. Cakra Media Data</h2>
+						</div>
+						<div style="padding: 30px;">
+							<p style="font-size: 16px;">Halo, <strong>%s</strong>,</p>
+							<p style="font-size: 15px; line-height: 1.6; color: #475569;">
+								Proses penilaian kinerja (KPI) Anda untuk <strong>%s</strong> telah selesai dievaluasi oleh <strong>%s</strong>.
+							</p>
+							<div style="background-color: #f8fafc; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0;">
+								<p style="margin: 0; font-size: 14px; color: #334155;">
+									Data rapor kinerja, nilai akhir, serta catatan <i>feedback</i> dari manajer Anda sudah dapat diakses melalui portal sistem internal perusahaan.
+								</p>
+							</div>
+							<div style="text-align: center; margin-top: 30px;">
+								<a href="%s" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">Lihat Rapor Kinerja</a>
+							</div>
+						</div>
+						<div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-top: 1px solid #e2e8f0;">
+							<p style="font-size: 12px; color: #64748b; margin: 0;">Pesan ini dihasilkan otomatis oleh Sistem KPI. Harap tidak membalas email ini.</p>
+						</div>
+					</div>
+				`, targetEmployee.Name, periodName, evaluatorName, appLink)
 
-            // Panggil fungsi pembantu kita
-            helper.SendEmailNotification(targetEmployee.Email, subject, htmlBody)
-        }
-    }()
-    // =================================================================
+				helper.SendEmailNotification(targetEmployee.Email, subject, htmlBody)
+			}
+		}()
+		// =================================================================
 
-    // --- [AUDIT TRAIL] ---
-    if idUint, ok := managerUserID.(uint); ok {
-        helper.LogActivity(mc.DB, idUint, "SUBMIT_EVALUATION", "Menilai pegawai: "+targetEmployee.Name, c.ClientIP())
-    }
+		// --- [AUDIT TRAIL] ---
+		if idUint, ok := managerUserID.(uint); ok {
+			helper.LogActivity(mc.DB, idUint, "SUBMIT_EVALUATION", "Menilai pegawai: "+targetEmployee.Name, c.ClientIP())
+		}
 
-    Response(c, http.StatusOK, "Evaluasi berhasil disubmit", evaluation)
+		Response(c, http.StatusOK, "Evaluasi berhasil disubmit", evaluation)
+		return
+	}
+
+	// --- [AUDIT TRAIL] untuk Draft ---
+	if idUint, ok := managerUserID.(uint); ok {
+		helper.LogActivity(mc.DB, idUint, "SAVE_DRAFT", "Menyimpan draft penilaian pegawai: "+targetEmployee.Name, c.ClientIP())
+	}
+
+	Response(c, http.StatusOK, "Draft berhasil disimpan", evaluation)
 }
 // CheckAndGenerateAutomaticSP bertugas memeriksa riwayat nilai dan menerbitkan SP 1, 2, atau 3
 func CheckAndGenerateAutomaticSP(tx *gorm.DB, employeeID uint, currentScore float64, evaluatorEmployeeID uint) error {
