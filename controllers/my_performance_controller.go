@@ -165,8 +165,17 @@ func (pc *MyPerformanceController) GetMyEvaluationDetail(c *gin.Context) {
 	isEvaluator := (userRole == db_var.RoleAdmin || userRole == db_var.RoleManager)
 
 	if !isOwner && !isEvaluator {
-		Response(c, http.StatusForbidden, "Anda tidak memiliki akses ke evaluasi ini", nil)
-		return
+		// Cek apakah pegawai yang login satu divisi dengan pemilik evaluasi (Untuk transparansi Top 5 Divisi)
+		var viewer models.Employee
+		pc.DB.First(&viewer, employeeID)
+		
+		var owner models.Employee
+		pc.DB.First(&owner, evaluation.EmployeeID)
+		
+		if viewer.DivisionID != owner.DivisionID {
+			Response(c, http.StatusForbidden, "Anda tidak memiliki akses ke evaluasi ini", nil)
+			return
+		}
 	}
 
 	// Ambil data pendukung
@@ -231,4 +240,62 @@ func (pc *MyPerformanceController) GetMyTopOneStatus(c *gin.Context) {
 	Response(c, http.StatusOK, "Berhasil memeriksa status top 1", gin.H{
 		"is_top_one": isTopOne,
 	})
+}
+
+// GetTopInDivision: Mendapatkan Top 5 Pegawai di divisi yang sama dengan pegawai yang login
+func (pc *MyPerformanceController) GetTopInDivision(c *gin.Context) {
+	employeeID, err := pc.getEmployeeIDFromToken(c)
+	if err != nil {
+		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan", nil)
+		return
+	}
+
+	// Ambil Divisi Pegawai
+	var employee models.Employee
+	if err := pc.DB.First(&employee, employeeID).Error; err != nil {
+		Response(c, http.StatusNotFound, "Data pegawai tidak ditemukan", nil)
+		return
+	}
+
+	var activePeriod models.EvaluationPeriod
+	if err := pc.DB.Where("is_active = ?", true).First(&activePeriod).Error; err != nil {
+		Response(c, http.StatusOK, "Tidak ada periode aktif", []string{})
+		return
+	}
+
+	type TopDivisionEmployee struct {
+		EvaluationID uint    `json:"evaluation_id"`
+		Name         string  `json:"name"`
+		TotalScore   float64 `json:"total_score"`
+		Grade      string  `json:"grade"`
+	}
+	var topEmployees []TopDivisionEmployee
+
+	pc.DB.Table("evaluations e").
+		Select("e.id as evaluation_id, emp.name, e.total_score").
+		Joins("JOIN employees emp ON emp.id = e.employee_id").
+		Where("emp.division_id = ? AND e.period_id = ? AND e.status = ?", employee.DivisionID, activePeriod.ID, "submitted").
+		Order("e.total_score DESC").
+		Limit(5).
+		Scan(&topEmployees)
+
+    for i, emp := range topEmployees {
+        if emp.TotalScore >= 86 {
+            topEmployees[i].Grade = "A"
+        } else if emp.TotalScore >= 71 {
+            topEmployees[i].Grade = "B"
+        } else if emp.TotalScore >= 56 {
+            topEmployees[i].Grade = "C"
+        } else if emp.TotalScore >= 41 {
+            topEmployees[i].Grade = "D"
+        } else {
+            topEmployees[i].Grade = "E"
+        }
+    }
+
+	if topEmployees == nil {
+		topEmployees = []TopDivisionEmployee{}
+	}
+
+	Response(c, http.StatusOK, "Berhasil mengambil top divisi", topEmployees)
 }

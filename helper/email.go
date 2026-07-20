@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/smtp"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -216,6 +217,8 @@ func SendWarningEmail(toEmail string, recipientName string, spLevel string, reas
 		colorTheme = "#ef4444" // Red for SP3
 	}
 
+	issuedDate := time.Now().Format("02 Jan 2006")
+
 	htmlBody := fmt.Sprintf(`
 	<!DOCTYPE html>
 	<html>
@@ -250,6 +253,12 @@ func SendWarningEmail(toEmail string, recipientName string, spLevel string, reas
 								<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:24px;">
 									<tr>
 										<td style="padding-bottom:12px;">
+											<span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;">Tanggal Diterbitkan:</span>
+											<span style="font-size:13.5px;font-weight:700;color:#1e293b;line-height:1.5;display:block;margin-top:2px;">%s</span>
+										</td>
+									</tr>
+									<tr>
+										<td style="border-top:1px solid #e2e8f0;padding-top:12px;padding-bottom:12px;">
 											<span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;">Alasan Pelanggaran / Masalah Kinerja:</span>
 											<span style="font-size:13.5px;font-weight:700;color:#1e293b;line-height:1.5;display:block;margin-top:2px;">%s</span>
 										</td>
@@ -282,7 +291,7 @@ func SendWarningEmail(toEmail string, recipientName string, spLevel string, reas
 			</tr>
 		</table>
 	</body>
-	</html>`, colorTheme, spLevel, recipientName, spLevel, reason, description)
+	</html>`, colorTheme, spLevel, recipientName, spLevel, issuedDate, reason, description)
 
 	return SendEmailNotification(toEmail, subject, htmlBody)
 }
