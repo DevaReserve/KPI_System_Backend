@@ -102,13 +102,16 @@ func (dc *DashboardController) GetCompanyPerformance(c *gin.Context) {
 
 	// 6. TOP PEGAWAI TERBAIK
 	type TopEmployee struct {
+		EvaluationID uint    `json:"evaluation_id"`
 		Name         string  `json:"name"`
+		Nip          string  `json:"nip"`
+		Position     string  `json:"position"`
 		DivisionName string  `json:"division_name"`
 		TotalScore   float64 `json:"total_score"`
 	}
 	var topEmployees []TopEmployee
 	topQuery := dc.DB.Table("evaluations e").
-		Select("emp.name, d.name as division_name, e.total_score").
+		Select("e.id as evaluation_id, emp.name, emp.n_ip as nip, emp.position, d.name as division_name, e.total_score").
 		Joins("JOIN employees emp ON emp.id = e.employee_id").
 		Joins("JOIN divisions d ON d.id = emp.division_id").
 		Where("e.status = ?", "submitted")
