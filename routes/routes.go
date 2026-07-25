@@ -41,13 +41,19 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	public := router.Group("/api")
 	public.Use(middleware.CORSMiddleware())
 	{
-		public.POST("/auth/login", authController.Login)
 		public.GET("/ping", pingController.Ping)
 
-		// Password Reset (Public - tanpa auth)
-		public.POST("/auth/forgot-password", passwordResetCtrl.ForgotPassword)
-		public.POST("/auth/verify-otp", passwordResetCtrl.VerifyOTP)
-		public.POST("/auth/reset-password", passwordResetCtrl.ResetPassword)
+		// Auth routes with rate limiting
+		authPublic := public.Group("/auth")
+		authPublic.Use(middleware.RateLimitMiddleware())
+		{
+			authPublic.POST("/login", authController.Login)
+			
+			// Password Reset (Public - tanpa auth)
+			authPublic.POST("/forgot-password", passwordResetCtrl.ForgotPassword)
+			authPublic.POST("/verify-otp", passwordResetCtrl.VerifyOTP)
+			authPublic.POST("/reset-password", passwordResetCtrl.ResetPassword)
+		}
 	}
 
 	// ---------------------------------------------------------
@@ -61,8 +67,14 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 		protected.GET("/auth/profile", authController.GetProfile)
 		protected.PUT("/auth/change-password", authController.ChangePassword)
 		protected.PUT("/auth/biodata", authController.UpdateBiodata)
-		protected.POST("/auth/phone/send-otp", authController.SendPhoneOTP)
-		protected.POST("/auth/phone/verify-otp", authController.VerifyPhoneOTP)
+		
+		authProtected := protected.Group("/auth/phone")
+		authProtected.Use(middleware.RateLimitMiddleware())
+		{
+			authProtected.POST("/send-otp", authController.SendPhoneOTP)
+			authProtected.POST("/verify-otp", authController.VerifyPhoneOTP)
+		}
+
 		protected.POST("/auth/logout", authController.Logout)
 		protected.GET("/activity-logs/my", activityCtrl.GetMyLogs)
 		protected.GET("/periods", periodController.GetAllPeriods)
@@ -116,6 +128,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 
 			// Reports
 			adminRoutes.GET("/reports/evaluations", reportController.GetEvaluationReport)
+			adminRoutes.GET("/reports/evaluations/export-excel", reportController.ExportEvaluationReportExcel)
+			adminRoutes.GET("/reports/comparison/export-excel", reportController.ExportComparisonExcel)
 
 			// Achevement
 			adminRoutes.GET("/employees/:id/achievements", achievementsCtrl.GetEmployeeAchievements)
