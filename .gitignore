@@ -1,0 +1,21 @@
+# Binaries
+*.exe
+main
+tmp_build*
+
+# Configurations & Secrets
+.env
+Setting.ini
+
+# WhatsApp Session
+wa_session.db
+wa_session.db*
+
+# User Uploads
+uploads/
+
+# OS/Editor Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
