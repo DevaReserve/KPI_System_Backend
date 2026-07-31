@@ -6,10 +6,12 @@ import (
 	"KPI_System_Backend/logger"
 	"KPI_System_Backend/models"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -17,17 +19,47 @@ func InitDB() (*gorm.DB, error) {
 	// 1. Ambil konfigurasi dari Setting.ini
 	dbConfig := config.GetIniDatabase()
 
-	// 2. Buat Data Source Name (DSN) string
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		dbConfig.User,
-		dbConfig.Password,
-		dbConfig.Host,
-		dbConfig.Port,
-		dbConfig.DatabaseName,
-	)
+	// 2. Pilih driver dan buat DSN berdasarkan setting "Driver" di Setting.ini
+	driver := strings.ToLower(strings.TrimSpace(dbConfig.Driver))
 
-	// 3. Buka koneksi ke database
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	var db *gorm.DB
+	var err error
+
+	switch driver {
+	case "postgres":
+		// Format DSN untuk PostgreSQL (Supabase / lokal)
+		dsn := fmt.Sprintf(
+			"host=%s user=%s password=%s dbname=%s port=%s sslmode=require TimeZone=Asia/Jakarta",
+			dbConfig.Host,
+			dbConfig.User,
+			dbConfig.Password,
+			dbConfig.DatabaseName,
+			dbConfig.Port,
+		)
+		logger.Info("Connecting to database using PostgreSQL driver...",
+			zap.String("host", dbConfig.Host),
+			zap.String("port", dbConfig.Port),
+		)
+		db, err = gorm.Open(postgres.New(postgres.Config{
+			DSN:                  dsn,
+			PreferSimpleProtocol: true, // Menonaktifkan implicit prepared statements (wajib untuk Supabase / pgBouncer)
+		}), &gorm.Config{})
+
+	default: // "mysql" atau tidak diisi
+		// Format DSN untuk MySQL
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+			dbConfig.User,
+			dbConfig.Password,
+			dbConfig.Host,
+			dbConfig.Port,
+			dbConfig.DatabaseName,
+		)
+		logger.Info("Connecting to database using MySQL driver...",
+			zap.String("host", dbConfig.Host),
+			zap.String("port", dbConfig.Port),
+		)
+		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	}
 	if err != nil {
 		logger.Error("Failed to connect to database", zap.Error(err))
 		return nil, err

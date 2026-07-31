@@ -1,6 +1,7 @@
 package global_var
 
 type DatabaseConnection struct {
+	Driver       string // "mysql" atau "postgres"
 	Host         string
 	Port         string
 	User         string

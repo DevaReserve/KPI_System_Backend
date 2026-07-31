@@ -66,26 +66,22 @@ func (ctrl *UploadController) UploadProfilePicture(c *gin.Context) {
 
 	// [CLEANUP] Hapus foto lama jika ada
 	if employee.ProfilePictureURL != "" {
-		// Konversi URL ke path lokal
-		// Contoh URL: http://localhost:8080/uploads/images/foto.jpg
-		// Path lokal: ./uploads/images/foto.jpg
 		oldFilename := filepath.Base(employee.ProfilePictureURL)
-		oldPath := "./uploads/images/" + oldFilename
-		
-		// Hapus file (abaikan error jika file sudah tidak ada)
-		_ = os.Remove(oldPath)
+		if strings.Contains(employee.ProfilePictureURL, "supabase") {
+			_ = helper.DeleteFromSupabase("kpi_uploads", oldFilename)
+		} else {
+			oldPath := "./uploads/images/" + oldFilename
+			_ = os.Remove(oldPath)
+		}
 	}
 
-	// Simpan File Baru
+	// Simpan File Baru ke Supabase Storage
 	filename := uuid.New().String() + ext
-	savePath := "./uploads/images/" + filename
-
-	if err := c.SaveUploadedFile(file, savePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file ke server"})
+	fileURL, err := helper.UploadToSupabase(file, "kpi_uploads", filename)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file ke Supabase"})
 		return
 	}
-
-	fileURL := "http://localhost:8080/uploads/images/" + filename
 
 	// Update Database
 	if err := ctrl.DB.Model(&models.Employee{}).Where("id = ?", user.EmployeeID).Update("profile_picture_url", fileURL).Error; err != nil {
@@ -140,22 +136,26 @@ func (ac *AchievementController) UpdateAchievement(c *gin.Context) {
 		// [CLEANUP] Hapus file dokumen lama
 		if achievement.FileURL != "" {
 			oldFilename := filepath.Base(achievement.FileURL)
-			oldPath := "./uploads/documents/" + oldFilename
-			_ = os.Remove(oldPath) // Hapus file lama
+			if strings.Contains(achievement.FileURL, "supabase") {
+				_ = helper.DeleteFromSupabase("kpi_uploads", oldFilename)
+			} else {
+				oldPath := "./uploads/documents/" + oldFilename
+				_ = os.Remove(oldPath)
+			}
 		}
 
-		// Simpan file baru
+		// Simpan file baru ke Supabase Storage
 		ext := strings.ToLower(filepath.Ext(file.Filename))
 		filename := uuid.New().String() + ext
-		savePath := "./uploads/documents/" + filename
-
-		if err := c.SaveUploadedFile(file, savePath); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file baru"})
+		
+		fileURL, err := helper.UploadToSupabase(file, "kpi_uploads", filename)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file baru ke Supabase"})
 			return
 		}
 		
 		// Update URL di struct
-		achievement.FileURL = "http://localhost:8080/uploads/documents/" + filename
+		achievement.FileURL = fileURL
 	}
 
 	// Simpan ke DB
