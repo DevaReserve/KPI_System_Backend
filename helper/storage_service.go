@@ -16,6 +16,10 @@ import (
 // UploadToSupabase menerima file dan menguploadnya ke Supabase Storage.
 // Mengembalikan URL publik dari file tersebut.
 func UploadToSupabase(file *multipart.FileHeader, bucketName, fileName string) (string, error) {
+	if config.SupabaseURL == "" || config.SupabaseKey == "" {
+		return "", fmt.Errorf("supabase config tidak lengkap: SUPABASE_URL atau SUPABASE_KEY kosong")
+	}
+
 	src, err := file.Open()
 	if err != nil {
 		logger.Error("Failed to open uploaded file", zap.Error(err))
@@ -31,9 +35,15 @@ func UploadToSupabase(file *multipart.FileHeader, bucketName, fileName string) (
 
 	storageClient := storage_go.NewClient(config.SupabaseURL+"/storage/v1", config.SupabaseKey, nil)
 
-	// contentType bisa diambil dari Header, atau kita kosongkan (Supabase sering kali bisa detect otomatis atau pakai param)
-	// Kita akan menggunakan byte buffer untuk upload
-	_, err = storageClient.UploadFile(bucketName, fileName, buf)
+	// Ambil ContentType dari Header agar file di-serve dengan benar oleh Supabase
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	_, err = storageClient.UploadFile(bucketName, fileName, buf, storage_go.FileOptions{
+		ContentType: &contentType,
+	})
 	if err != nil {
 		logger.Error("Failed to upload to Supabase Storage", zap.Error(err))
 		return "", err
