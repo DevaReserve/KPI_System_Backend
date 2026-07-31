@@ -64,17 +64,15 @@ func (ac *AchievementController) CreateAchievement(c *gin.Context) {
 		return
 	}
 
-	// Simpan File
+	// Simpan File ke Supabase Storage
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	filename := uuid.New().String() + ext
-	savePath := "./uploads/documents/" + filename // Pastikan folder ini ada
-
-	if err := c.SaveUploadedFile(file, savePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file"})
+	
+	fileURL, err := helper.UploadToSupabase(file, "kpi_uploads", filename)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file ke Supabase"})
 		return
 	}
-
-	fileURL := "http://localhost:8080/uploads/documents/" + filename
 
 	// 5. Simpan ke Database
 	achievement := models.EmployeeAchievement{
@@ -132,8 +130,12 @@ func (ac *AchievementController) DeleteAchievement(c *gin.Context) {
 	// [CLEANUP] Hapus file fisik sebelum hapus data DB
 	if achievement.FileURL != "" {
 		oldFilename := filepath.Base(achievement.FileURL)
-		oldPath := "./uploads/documents/" + oldFilename
-		_ = os.Remove(oldPath)
+		if strings.Contains(achievement.FileURL, "supabase") {
+			_ = helper.DeleteFromSupabase("kpi_uploads", oldFilename)
+		} else {
+			oldPath := "./uploads/documents/" + oldFilename
+			_ = os.Remove(oldPath)
+		}
 	}
 
 	if err := ac.DB.Delete(&achievement).Error; err != nil {

@@ -3,73 +3,93 @@ package config
 import (
 	"KPI_System_Backend/global_var"
 	"KPI_System_Backend/logger"
+	"os"
+	"strconv"
 
+	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 	"gopkg.in/ini.v1"
 )
 
 var (
-	IniConfig *ini.File
-	AppPort   string
-    FrontEndURL string
-	JWTSecret string
-	JWTExpiry int
+	IniConfig   *ini.File
+	AppPort     string
+	FrontEndURL string
+	JWTSecret   string
+	JWTExpiry   int
+
+	SupabaseURL string
+	SupabaseKey string
 )
 
 func InitINIConfig() {
-	cfg, err := ini.Load("Setting.ini")
+	// 1. Load dari .env (jika ada, biasanya untuk lokal)
+	err := godotenv.Load()
 	if err != nil {
-		// Fallback jika file tidak ada (agar tidak panic saat dev)
-		logger.Warn("failed to read setting.ini file, using defaults", zap.Error(err))
-		JWTSecret = "rahasia_default_kpi_system_123"
-		JWTExpiry = 24
-		AppPort = ":8080"
-		return
+		logger.Warn("No .env file found or failed to read, will rely on system environment variables", zap.Error(err))
 	}
-	IniConfig = cfg
+
+	// 2. Fallback baca Setting.ini (backward compatibility)
+	cfg, err := ini.Load("Setting.ini")
+	if err == nil {
+		IniConfig = cfg
+	}
+}
+
+// Helper untuk membaca urutan: Env -> INI -> Default
+func getEnvOrIni(envKey, iniSection, iniKey, defaultVal string) string {
+	if val := os.Getenv(envKey); val != "" {
+		return val
+	}
+	if IniConfig != nil {
+		if sec := IniConfig.Section(iniSection); sec != nil {
+			if key := sec.Key(iniKey); key != nil && key.String() != "" {
+				return key.String()
+			}
+		}
+	}
+	return defaultVal
 }
 
 func GetIniDatabase() global_var.DatabaseConnection {
-	if IniConfig == nil {
-		return global_var.DatabaseConnection{}
-	}
-	
-	section := IniConfig.Section("MainDatabase")
 	return global_var.DatabaseConnection{
-		Host:         section.Key("Host Name").String(),
-		Port:         section.Key("Port").String(),
-		User:         section.Key("User Name").String(),
-		Password:     section.Key("Password").String(),
-		DatabaseName: section.Key("Database Name").String(),
-		CreateDBTest: section.Key("CreateDBTest").MustBool(false),
+		Driver:       getEnvOrIni("DB_DRIVER", "MainDatabase", "Driver", "postgres"),
+		Host:         getEnvOrIni("DB_HOST", "MainDatabase", "Host Name", "localhost"),
+		Port:         getEnvOrIni("DB_PORT", "MainDatabase", "Port", "6543"),
+		User:         getEnvOrIni("DB_USER", "MainDatabase", "User Name", "postgres"),
+		Password:     getEnvOrIni("DB_PASSWORD", "MainDatabase", "Password", ""),
+		DatabaseName: getEnvOrIni("DB_NAME", "MainDatabase", "Database Name", "postgres"),
+		CreateDBTest: false, // Disetel false untuk default (bisa diatur lewat env jika diperlukan nanti)
 	}
 }
 
 func LoadAppPort() {
-	if IniConfig != nil {
-		AppPort = IniConfig.Section("GlobalConfig").Key("AppPort").String()
-        FrontEndURL = IniConfig.Section("GlobalConfig").Key("FrontEndURL").String()
+	AppPort = getEnvOrIni("APP_PORT", "GlobalConfig", "AppPort", "8080")
+	// Jika dari env tidak ada prefix ":", tambahkan
+	if AppPort != "" && AppPort[0] != ':' {
+		AppPort = ":" + AppPort
 	}
 	if AppPort == "" {
 		AppPort = ":8080"
 	}
-    if FrontEndURL == "" {
-        FrontEndURL = "http://localhost:5173"
-    }
+	FrontEndURL = getEnvOrIni("FRONTEND_URL", "GlobalConfig", "FrontEndURL", "http://localhost:5173")
 }
 
 func LoadJWTConfig() {
-	if IniConfig != nil {
-		JWTSecret = IniConfig.Section("JWTConfig").Key("Secret").String()
-		JWTExpiry = IniConfig.Section("JWTConfig").Key("ExpiryHours").MustInt(24)
-	}
-	// Fallback values
-	if JWTSecret == "" {
-		JWTSecret = "rahasia_super_aman_cakra_123"
-	}
-	if JWTExpiry == 0 {
+	JWTSecret = getEnvOrIni("JWT_SECRET", "JWTConfig", "Secret", "rahasia_super_aman_cakra_123")
+	
+	expiryStr := getEnvOrIni("JWT_EXPIRY_HOURS", "JWTConfig", "ExpiryHours", "24")
+	expiryInt, err := strconv.Atoi(expiryStr)
+	if err != nil || expiryInt == 0 {
 		JWTExpiry = 24
+	} else {
+		JWTExpiry = expiryInt
 	}
+}
+
+func LoadSupabaseConfig() {
+	SupabaseURL = os.Getenv("SUPABASE_URL")
+	SupabaseKey = os.Getenv("SUPABASE_KEY")
 }
 
 // --- SMTP Configuration ---
@@ -83,37 +103,31 @@ var (
 )
 
 func LoadSMTPConfig() {
-	if IniConfig != nil {
-		// 1. Coba baca dari section [SMTPConfig]
-		SMTPHost = IniConfig.Section("SMTPConfig").Key("Host").String()
-		SMTPPort = IniConfig.Section("SMTPConfig").Key("Port").String()
-		SMTPSenderEmail = IniConfig.Section("SMTPConfig").Key("SenderEmail").String()
-		SMTPSenderPassword = IniConfig.Section("SMTPConfig").Key("SenderPassword").String()
-		SMTPSenderName = IniConfig.Section("SMTPConfig").Key("SenderName").String()
+	SMTPHost = getEnvOrIni("SMTP_HOST", "SMTPConfig", "Host", "smtp.gmail.com")
+	SMTPPort = getEnvOrIni("SMTP_PORT", "SMTPConfig", "Port", "587")
+	SMTPSenderEmail = getEnvOrIni("SMTP_EMAIL", "SMTPConfig", "SenderEmail", "")
+	SMTPSenderPassword = getEnvOrIni("SMTP_PASSWORD", "SMTPConfig", "SenderPassword", "")
+	SMTPSenderName = getEnvOrIni("SMTP_SENDER_NAME", "SMTPConfig", "SenderName", "KPI System Admin")
 
-		// 2. Fallback jika ditulis di root/DEFAULT tanpa header [SMTPConfig] atau dengan nama SMTP_HOST / SMTP_EMAIL
-		if SMTPHost == "" {
-			SMTPHost = IniConfig.Section("").Key("SMTP_HOST").String()
-		}
-		if SMTPPort == "" {
-			SMTPPort = IniConfig.Section("").Key("SMTP_PORT").String()
-		}
-		if SMTPSenderEmail == "" {
-			SMTPSenderEmail = IniConfig.Section("").Key("SMTP_EMAIL").String()
-		}
-		if SMTPSenderPassword == "" {
-			SMTPSenderPassword = IniConfig.Section("").Key("SMTP_PASSWORD").String()
+	// Fallback check if defined at root/DEFAULT in ini
+	if SMTPHost == "smtp.gmail.com" && IniConfig != nil {
+		if val := IniConfig.Section("").Key("SMTP_HOST").String(); val != "" {
+			SMTPHost = val
 		}
 	}
-
-	// 3. Fallback ke default & nilai aman
-	if SMTPHost == "" {
-		SMTPHost = "smtp.gmail.com"
+	if SMTPPort == "587" && IniConfig != nil {
+		if val := IniConfig.Section("").Key("SMTP_PORT").String(); val != "" {
+			SMTPPort = val
+		}
 	}
-	if SMTPPort == "" {
-		SMTPPort = "587"
+	if SMTPSenderEmail == "" && IniConfig != nil {
+		if val := IniConfig.Section("").Key("SMTP_EMAIL").String(); val != "" {
+			SMTPSenderEmail = val
+		}
 	}
-	if SMTPSenderName == "" {
-		SMTPSenderName = "KPI System Admin"
+	if SMTPSenderPassword == "" && IniConfig != nil {
+		if val := IniConfig.Section("").Key("SMTP_PASSWORD").String(); val != "" {
+			SMTPSenderPassword = val
+		}
 	}
-}
+}

@@ -6,8 +6,9 @@ import (
 	"os"
 	"sync"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/lib/pq"
 
+	"KPI_System_Backend/config"
 	"KPI_System_Backend/logger"
 
 	"go.mau.fi/whatsmeow"
@@ -36,9 +37,20 @@ func InitWhatsApp() {
 	defer waClientMu.Unlock()
 
 	dbLog := waLog.Noop
-	container, err := sqlstore.New(context.Background(), "sqlite", "file:wa_session.db?_pragma=foreign_keys(1)", dbLog)
+
+	dbConfig := config.GetIniDatabase()
+	dsn := fmt.Sprintf(
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=require TimeZone=Asia/Jakarta",
+		dbConfig.Host,
+		dbConfig.User,
+		dbConfig.Password,
+		dbConfig.DatabaseName,
+		dbConfig.Port,
+	)
+
+	container, err := sqlstore.New(context.Background(), "postgres", dsn, dbLog)
 	if err != nil {
-		logger.Error("Gagal membuat WhatsApp SQLite store", zap.Error(err))
+		logger.Error("Gagal membuat WhatsApp Postgres store", zap.Error(err))
 		return
 	}
 
