@@ -150,8 +150,10 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 			// Reports + Comparison
 			adminRoutes.GET("/reports/comparison", reportController.GetPeriodComparison) // [BARU] Komparasi 2 Periode
 
-			// WhatsApp Bot Status
-			adminRoutes.GET("/wa/status", whatsAppCtrl.GetWAStatus) // Status & QR Code WhatsApp Bot
+			// WhatsApp Bot Status & Pairing (SSE)
+			adminRoutes.GET("/wa/status", whatsAppCtrl.GetStatus)
+			adminRoutes.GET("/wa/pair-stream", whatsAppCtrl.PairStream)
+			adminRoutes.POST("/wa/logout", whatsAppCtrl.Logout)
 		}
 
 		// ---------------------------------------------------------

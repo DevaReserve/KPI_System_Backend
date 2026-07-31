@@ -3,7 +3,6 @@ package helper
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	_ "github.com/lib/pq"
@@ -18,7 +17,6 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
-	"github.com/skip2/go-qrcode"
 )
 
 var (
@@ -27,17 +25,20 @@ var (
 	waReady    bool
 )
 
-// InitWhatsApp menginisialisasi koneksi WhatsApp menggunakan whatsmeow.
-// Session disimpan di file SQLite wa_session.db agar tidak perlu scan QR ulang.
+// InitWhatsApp hanya melakukan inisialisasi store dan client.
+// Jika sudah ada sesi tersimpan, ia akan langsung Connect().
+// Jika belum, ia tidak akan melakukan apa-apa (menunggu trigger dari frontend).
 func InitWhatsApp() {
-	fmt.Println(">>> [DEBUG] InitWhatsApp() mulai dipanggil...")
-	logger.Info("Memulai inisialisasi WhatsApp Service...")
-
 	waClientMu.Lock()
 	defer waClientMu.Unlock()
 
-	dbLog := waLog.Noop
+	if waClient != nil {
+		return // Sudah diinisialisasi
+	}
 
+	logger.Info("Memulai inisialisasi WhatsApp Service...")
+
+	dbLog := waLog.Noop
 	dbConfig := config.GetIniDatabase()
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=require TimeZone=Asia/Jakarta",
@@ -63,55 +64,85 @@ func InitWhatsApp() {
 	clientLog := waLog.Noop
 	client := whatsmeow.NewClient(deviceStore, clientLog)
 
-	if client.Store.ID == nil {
-		fmt.Println(">>> [DEBUG] Belum ada session, meminta QR channel...")
-		// Belum pernah login, perlu scan QR — tulis QR ke file teks
-		qrChan, _ := client.GetQRChannel(context.Background())
-		err = client.Connect()
-		if err != nil {
-			logger.Error("Gagal connect WhatsApp client untuk QR", zap.Error(err))
-			return
-		}
-		go func() {
-			for evt := range qrChan {
-				if evt.Event == "code" {
-					// Windows terminal sering bermasalah me-render bentuk persegi panjang/spasi QR code.
-					// Kita buatkan saja file gambarnya (.png) agar bisa dibuka oleh pengguna.
-					errQR := qrcode.WriteFile(evt.Code, qrcode.Medium, 256, "wa_qr.png")
-					
-					fmt.Println("\n========================================================")
-					if errQR != nil {
-						fmt.Println("    [ERROR] Gagal membuat file wa_qr.png:", errQR)
-					} else {
-						fmt.Println("    [WhatsApp OTP] QR Code Berhasil Dibuat!")
-						fmt.Println("    Silakan buka file 'wa_qr.png' yang ada di folder")
-						fmt.Println("    KPI_System_Backend untuk men-scan QR-nya.")
-						fmt.Println("    (File akan terus diperbarui otomatis tiap 20 detik)")
-					}
-					fmt.Println("========================================================\n")
-					
-					// Simpan raw code ke file teks juga
-					_ = os.WriteFile("wa_qr.txt", []byte(evt.Code), 0644)
-					logger.Info("[WhatsApp] Menunggu QR code di-scan...")
-				} else if evt.Event == "success" {
-					logger.Info("[WhatsApp] QR Code berhasil di-scan! Sesi tersimpan.")
-					waReady = true
-					_ = os.Remove("wa_qr.txt") // hapus file QR teks
-					_ = os.Remove("wa_qr.png") // hapus file QR gambar
-				}
-			}
-		}()
-	} else {
+	if client.Store.ID != nil {
+		// Sudah ada sesi, langsung connect
 		err = client.Connect()
 		if err != nil {
 			logger.Error("Gagal menghubungkan WhatsApp client", zap.Error(err))
-			return
+		} else {
+			waReady = true
+			logger.Info("[WhatsApp] Client berhasil terhubung menggunakan sesi tersimpan.")
 		}
-		waReady = true
-		logger.Info("[WhatsApp] Client berhasil terhubung menggunakan sesi tersimpan.")
+	} else {
+		logger.Info("[WhatsApp] Belum ada sesi tersimpan. Menunggu pairing dari Frontend.")
 	}
 
 	waClient = client
+}
+
+// RequestQRPairing meminta channel QR untuk keperluan scanning dinamis.
+// Fungsi ini mengembalikan channel events.
+func RequestQRPairing(ctx context.Context) (<-chan whatsmeow.QRChannelItem, error) {
+	waClientMu.Lock()
+	client := waClient
+	waClientMu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("whatsapp client belum diinisialisasi")
+	}
+
+	if client.Store.ID != nil {
+		// Jika sudah login, pastikan connect saja
+		if !client.IsConnected() {
+			client.Connect()
+			waClientMu.Lock()
+			waReady = true
+			waClientMu.Unlock()
+		}
+		return nil, fmt.Errorf("already_logged_in")
+	}
+
+	// Jika belum terhubung, hubungkan untuk mendapatkan QR
+	if !client.IsConnected() {
+		err := client.Connect()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	qrChan, err := client.GetQRChannel(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return qrChan, nil
+}
+
+// SetWAReady dipanggil oleh controller jika menerima event "success" dari qrChan
+func SetWAReady() {
+	waClientMu.Lock()
+	defer waClientMu.Unlock()
+	waReady = true
+	logger.Info("[WhatsApp] QR Code berhasil di-scan! Sesi tersimpan.")
+}
+
+// LogoutWhatsApp menghapus sesi WA saat ini.
+func LogoutWhatsApp() error {
+	waClientMu.Lock()
+	defer waClientMu.Unlock()
+	
+	waReady = false
+	if waClient == nil {
+		return nil
+	}
+
+	err := waClient.Logout(context.Background())
+	if err != nil {
+		// Jika gagal logout via network, kita paksa putus koneksi
+		waClient.Disconnect()
+		return err
+	}
+	return nil
 }
 
 // IsWhatsAppReady mengembalikan status koneksi WhatsApp.
@@ -121,40 +152,25 @@ func IsWhatsAppReady() bool {
 	return waReady && waClient != nil && waClient.IsConnected() && waClient.IsLoggedIn()
 }
 
-// GetWhatsAppQRCode membaca file wa_qr.txt jika ada (saat belum login).
-func GetWhatsAppQRCode() (string, bool) {
-	data, err := os.ReadFile("wa_qr.txt")
-	if err != nil {
-		return "", false
-	}
-	return string(data), true
-}
-
-// formatPhoneForWA mengubah nomor lokal Indonesia menjadi format internasional.
-// Contoh: "08123456789" -> "628123456789"
 func formatPhoneForWA(phone string) string {
 	if len(phone) == 0 {
 		return phone
 	}
-	// Hapus spasi, tanda hubung, tanda kurung
 	cleaned := ""
 	for _, c := range phone {
 		if c >= '0' && c <= '9' || c == '+' {
 			cleaned += string(c)
 		}
 	}
-	// Ganti awalan "0" dengan "62" (kode negara Indonesia)
 	if len(cleaned) > 0 && cleaned[0] == '0' {
 		cleaned = "62" + cleaned[1:]
 	}
-	// Hapus tanda "+" jika ada
 	if len(cleaned) > 0 && cleaned[0] == '+' {
 		cleaned = cleaned[1:]
 	}
 	return cleaned
 }
 
-// SendPhoneOTPWhatsApp mengirimkan kode OTP ke nomor WhatsApp karyawan.
 func SendPhoneOTPWhatsApp(phone string, otpCode string, recipientName string) error {
 	waClientMu.Lock()
 	client := waClient
