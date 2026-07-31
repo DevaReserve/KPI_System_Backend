@@ -70,7 +70,7 @@ func (ac *AchievementController) CreateAchievement(c *gin.Context) {
 	
 	fileURL, err := helper.UploadToSupabase(file, "kpi_uploads", filename)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file ke Supabase"})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file baru ke Supabase: " + err.Error()})
 		return
 	}
 

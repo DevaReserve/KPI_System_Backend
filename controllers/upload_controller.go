@@ -79,7 +79,7 @@ func (ctrl *UploadController) UploadProfilePicture(c *gin.Context) {
 	filename := uuid.New().String() + ext
 	fileURL, err := helper.UploadToSupabase(file, "kpi_uploads", filename)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file ke Supabase"})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyimpan file ke Supabase: " + err.Error()})
 		return
 	}
 
