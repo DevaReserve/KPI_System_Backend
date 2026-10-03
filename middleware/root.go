@@ -55,7 +55,7 @@ func AuthMiddleware(db *gorm.DB) gin.HandlerFunc {
             return
         }
 
-        // Jika status is_active bernilai false (artinya sudah di-DO/Non-Aktifkan oleh Admin)
+        // Jika status is_active bernilai false (artinya sudah di Non-Aktifkan oleh Admin)
         if !user.IsActive {
             c.JSON(http.StatusForbidden, global_var.ResponseFormat{
                 Status:  http.StatusForbidden,
