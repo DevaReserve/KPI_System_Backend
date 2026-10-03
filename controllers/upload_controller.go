@@ -67,7 +67,7 @@ func (ctrl *UploadController) UploadProfilePicture(c *gin.Context) {
 	// [CLEANUP] Hapus foto lama jika ada
 	if employee.ProfilePictureURL != "" {
 		oldFilename := filepath.Base(employee.ProfilePictureURL)
-		if strings.Contains(employee.ProfilePictureURL, "supabase") {
+		if strings.Contains(employee.ProfilePictureURL, "/uploads/kpi_uploads/") {
 			_ = helper.DeleteFromSupabase("kpi_uploads", oldFilename)
 		} else {
 			oldPath := "./uploads/images/" + oldFilename
@@ -136,7 +136,7 @@ func (ac *AchievementController) UpdateAchievement(c *gin.Context) {
 		// [CLEANUP] Hapus file dokumen lama
 		if achievement.FileURL != "" {
 			oldFilename := filepath.Base(achievement.FileURL)
-			if strings.Contains(achievement.FileURL, "supabase") {
+			if strings.Contains(achievement.FileURL, "/uploads/kpi_uploads/") {
 				_ = helper.DeleteFromSupabase("kpi_uploads", oldFilename)
 			} else {
 				oldPath := "./uploads/documents/" + oldFilename

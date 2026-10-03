@@ -6,6 +6,7 @@ import (
 	"KPI_System_Backend/logger"
 	"KPI_System_Backend/models"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -27,14 +28,19 @@ func InitDB() (*gorm.DB, error) {
 
 	switch driver {
 	case "postgres":
-		// Format DSN untuk PostgreSQL (Supabase / lokal)
+		// Format DSN untuk PostgreSQL lokal. DB_SSLMODE default "disable".
+		sslMode := os.Getenv("DB_SSLMODE")
+		if sslMode == "" {
+			sslMode = "disable"
+		}
 		dsn := fmt.Sprintf(
-			"host=%s user=%s password=%s dbname=%s port=%s sslmode=require TimeZone=Asia/Jakarta",
+			"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=Asia/Jakarta",
 			dbConfig.Host,
 			dbConfig.User,
 			dbConfig.Password,
 			dbConfig.DatabaseName,
 			dbConfig.Port,
+			sslMode,
 		)
 		logger.Info("Connecting to database using PostgreSQL driver...",
 			zap.String("host", dbConfig.Host),
@@ -58,6 +64,22 @@ func InitDB() (*gorm.DB, error) {
 			zap.String("host", dbConfig.Host),
 			zap.String("port", dbConfig.Port),
 		)
+
+		// Buat database otomatis jika belum ada (koneksi tanpa nama database)
+		serverDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/?charset=utf8mb4&parseTime=True&loc=Local",
+			dbConfig.User, dbConfig.Password, dbConfig.Host, dbConfig.Port)
+		if serverDB, srvErr := gorm.Open(mysql.Open(serverDSN), &gorm.Config{}); srvErr == nil {
+			createSQL := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", dbConfig.DatabaseName)
+			if execErr := serverDB.Exec(createSQL).Error; execErr != nil {
+				logger.Warn("Failed to auto-create database", zap.Error(execErr))
+			}
+			if sqlDB, e := serverDB.DB(); e == nil {
+				sqlDB.Close()
+			}
+		} else {
+			logger.Warn("Failed to connect to MySQL server for auto-create database", zap.Error(srvErr))
+		}
+
 		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	}
 	if err != nil {
