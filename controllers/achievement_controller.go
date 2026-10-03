@@ -130,7 +130,7 @@ func (ac *AchievementController) DeleteAchievement(c *gin.Context) {
 	// [CLEANUP] Hapus file fisik sebelum hapus data DB
 	if achievement.FileURL != "" {
 		oldFilename := filepath.Base(achievement.FileURL)
-		if strings.Contains(achievement.FileURL, "supabase") {
+		if strings.Contains(achievement.FileURL, "/uploads/kpi_uploads/") {
 			_ = helper.DeleteFromSupabase("kpi_uploads", oldFilename)
 		} else {
 			oldPath := "./uploads/documents/" + oldFilename

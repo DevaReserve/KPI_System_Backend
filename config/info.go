@@ -20,6 +20,9 @@ var (
 
 	SupabaseURL string
 	SupabaseKey string
+
+	// BackendURL dipakai untuk membentuk URL publik file upload lokal.
+	BackendURL string
 )
 
 func InitINIConfig() {
@@ -55,7 +58,7 @@ func GetIniDatabase() global_var.DatabaseConnection {
 	return global_var.DatabaseConnection{
 		Driver:       getEnvOrIni("DB_DRIVER", "MainDatabase", "Driver", "postgres"),
 		Host:         getEnvOrIni("DB_HOST", "MainDatabase", "Host Name", "localhost"),
-		Port:         getEnvOrIni("DB_PORT", "MainDatabase", "Port", "6543"),
+		Port:         getEnvOrIni("DB_PORT", "MainDatabase", "Port", "5432"),
 		User:         getEnvOrIni("DB_USER", "MainDatabase", "User Name", "postgres"),
 		Password:     getEnvOrIni("DB_PASSWORD", "MainDatabase", "Password", ""),
 		DatabaseName: getEnvOrIni("DB_NAME", "MainDatabase", "Database Name", "postgres"),
@@ -72,7 +75,8 @@ func LoadAppPort() {
 	if AppPort == "" {
 		AppPort = ":8080"
 	}
-	FrontEndURL = getEnvOrIni("FRONTEND_URL", "GlobalConfig", "FrontEndURL", "http://localhost:5173")
+	FrontEndURL = getEnvOrIni("FRONTEND_URL", "GlobalConfig", "FrontEndURL", "http://localhost:3000")
+	BackendURL = getEnvOrIni("BACKEND_URL", "GlobalConfig", "BackendURL", "http://localhost"+AppPort)
 }
 
 func LoadJWTConfig() {
